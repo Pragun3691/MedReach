@@ -1,0 +1,32 @@
+{
+  "name": "medreach-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=.env src/server.js",
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "lint": "oxlint .",
+    "migrate:create": "node ./node_modules/node-pg-migrate/bin/node-pg-migrate.js create",
+    "migrate:up": "node --env-file=.env ./node_modules/node-pg-migrate/bin/node-pg-migrate.js up",
+    "migrate:down": "node --env-file=.env ./node_modules/node-pg-migrate/bin/node-pg-migrate.js down",
+    "verify:auth-schema": "node --env-file=.env scripts/verify-auth-schema.js",
+    "seed:public-discovery": "node --env-file=.env scripts/seed-public-discovery.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "node-pg-migrate": "^9.0.0",
+    "oxlint": "^1.80.0",
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "argon2": "^0.45.1",
+    "connect-pg-simple": "^10.0.0",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "pg": "^8.23.0",
+    "zod": "^4.5.4"
+  }
+}
