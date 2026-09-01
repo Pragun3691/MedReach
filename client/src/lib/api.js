@@ -68,6 +68,48 @@ export function registerDoctorAccount(account) {
   })
 }
 
+export function bookAppointment(slotId) {
+  return requestJson('/api/appointments', {
+    method: 'POST',
+    body: JSON.stringify({ slotId }),
+  })
+}
+
+export function listPatientAppointments(signal) {
+  return requestJson('/api/appointments/me', { signal })
+}
+
+export function listDoctorAppointments(signal) {
+  return requestJson('/api/doctors/me/appointments', { signal })
+}
+
+export function getAppointment(appointmentId, signal) {
+  return requestJson(`/api/appointments/${appointmentId}`, { signal })
+}
+
+export function cancelAppointment(appointmentId, reason) {
+  return requestJson(`/api/appointments/${appointmentId}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify(reason ? { reason } : {}),
+  })
+}
+
+export function rescheduleAppointment(appointmentId, slotId) {
+  return requestJson(`/api/appointments/${appointmentId}/reschedule`, {
+    method: 'POST',
+    body: JSON.stringify({ slotId }),
+  })
+}
+
+export function listNotifications({ limit = 20, offset = 0, signal } = {}) {
+  const query = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  return requestJson(`/api/notifications?${query.toString()}`, { signal })
+}
+
+export function markNotificationRead(notificationId) {
+  return requestJson(`/api/notifications/${notificationId}/read`, { method: 'PATCH' })
+}
+
 export function getHomeDiscovery(signal) {
   return Promise.all([
     listSpecializations(signal),

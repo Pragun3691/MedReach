@@ -57,6 +57,12 @@ function buildSearchConditions(filters) {
         WHERE ab_date.doctor_id = u.id
           AND s_date.is_active = TRUE
           AND s_date.start_at > current_timestamp
+          AND NOT EXISTS (
+            SELECT 1
+            FROM appointments a_date
+            WHERE a_date.slot_id = s_date.id
+              AND a_date.status = 'booked'
+          )
           AND (s_date.start_at AT TIME ZONE 'Asia/Kolkata')::date = ${placeholder}::date
       )
     `)
@@ -105,6 +111,12 @@ const publicDoctorSelect = `
       WHERE ab.doctor_id = u.id
         AND s.is_active = TRUE
         AND s.start_at > current_timestamp
+        AND NOT EXISTS (
+          SELECT 1
+          FROM appointments a_next
+          WHERE a_next.slot_id = s.id
+            AND a_next.status = 'booked'
+        )
     ) AS next_available_at
   FROM users u
   JOIN doctor_profiles dp ON dp.user_id = u.id
@@ -166,6 +178,12 @@ export const publicDoctorRepository = {
        WHERE ab.doctor_id = $1
          AND s.is_active = TRUE
          AND s.start_at > current_timestamp
+         AND NOT EXISTS (
+           SELECT 1
+           FROM appointments a
+           WHERE a.slot_id = s.id
+             AND a.status = 'booked'
+         )
          AND (s.start_at AT TIME ZONE 'Asia/Kolkata')::date = $2::date
        ORDER BY s.start_at ASC`,
       [doctorId, date],

@@ -73,6 +73,10 @@ export function DoctorProfilePage() {
   const requestedSlotId = Number.isInteger(requestedSlotValue) && requestedSlotValue > 0
     ? requestedSlotValue
     : null
+  const rescheduleValue = Number(searchParams.get('rescheduleFrom'))
+  const rescheduleFrom = Number.isInteger(rescheduleValue) && rescheduleValue > 0
+    ? rescheduleValue
+    : null
   const selectedDate = useMemo(() => {
     if (!doctor) return null
     if (isCalendarDate(requestedDate) && requestedDate >= todayInIndia()) return requestedDate
@@ -198,6 +202,7 @@ export function DoctorProfilePage() {
               doctor={doctor}
               onDateChange={changeDate}
               requestedSlotId={requestedSlotId}
+              rescheduleFrom={rescheduleFrom}
               selectedDate={selectedDate}
             />
           </div>

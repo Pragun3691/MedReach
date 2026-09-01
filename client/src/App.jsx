@@ -1,8 +1,13 @@
 import { Route, Routes } from 'react-router-dom'
+import { ProtectedRoute } from './components/ProtectedRoute.jsx'
+import { AppointmentDetailPage } from './pages/AppointmentDetailPage.jsx'
+import { AppointmentsPage } from './pages/AppointmentsPage.jsx'
+import { DoctorAppointmentsPage } from './pages/DoctorAppointmentsPage.jsx'
 import { DoctorProfilePage } from './pages/DoctorProfilePage.jsx'
 import { DoctorResultsPage } from './pages/DoctorResultsPage.jsx'
 import { HomePage } from './pages/HomePage.jsx'
 import { LoginPage } from './pages/LoginPage.jsx'
+import { NotificationsPage } from './pages/NotificationsPage.jsx'
 import { RegisterPage } from './pages/RegisterPage.jsx'
 
 function NotFoundPage() {
@@ -31,6 +36,22 @@ function App() {
       <Route path="/doctors/:doctorId" element={<DoctorProfilePage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route
+        path="/appointments"
+        element={<ProtectedRoute allowedRoles={['patient']}><AppointmentsPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/appointments/:appointmentId"
+        element={<ProtectedRoute allowedRoles={['patient', 'doctor']}><AppointmentDetailPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/doctor/appointments"
+        element={<ProtectedRoute allowedRoles={['doctor']}><DoctorAppointmentsPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/notifications"
+        element={<ProtectedRoute allowedRoles={['patient', 'doctor', 'admin']}><NotificationsPage /></ProtectedRoute>}
+      />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
   )

@@ -35,13 +35,21 @@ function visibleDates(selectedDate) {
   return Array.from({ length: 5 }, (_, index) => addCalendarDays(start, index))
 }
 
-export function DoctorAvailability({ doctor, selectedDate, requestedSlotId, onDateChange }) {
+export function DoctorAvailability({ doctor, selectedDate, requestedSlotId, rescheduleFrom, onDateChange }) {
   const { status } = useAuth()
   const [requestVersion, setRequestVersion] = useState(0)
   const [slotState, setSlotState] = useState({ key: null, data: null, error: null })
   const [selection, setSelection] = useState(null)
   const [bookingOpen, setBookingOpen] = useState(false)
-  const closeBooking = useCallback(() => setBookingOpen(false), [])
+  const [activeSlot, setActiveSlot] = useState(null)
+  const closeBooking = useCallback(() => {
+    setBookingOpen(false)
+    setActiveSlot(null)
+  }, [])
+  const refreshUnavailable = useCallback(() => {
+    setSelection(null)
+    setRequestVersion(version => version + 1)
+  }, [])
   const requestKey = `${doctor.id}:${selectedDate}:${requestVersion}`
   const dates = useMemo(() => visibleDates(selectedDate), [selectedDate])
 
@@ -68,7 +76,7 @@ export function DoctorAvailability({ doctor, selectedDate, requestedSlotId, onDa
     <aside className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-34px_rgba(15,23,42,0.45)] sm:p-6" aria-labelledby="availability-heading">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold text-blue-700">Book a consultation</p>
+          <p className="text-sm font-semibold text-blue-700">{rescheduleFrom ? 'Choose a new time' : 'Book a consultation'}</p>
           <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950" id="availability-heading">Choose a date and time</h2>
         </div>
         <span className="shrink-0 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">30 min</span>
@@ -162,23 +170,28 @@ export function DoctorAvailability({ doctor, selectedDate, requestedSlotId, onDa
         <button
           className="mt-4 min-h-12 w-full rounded-lg bg-blue-700 px-5 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
           disabled={!selectedSlot}
-          onClick={() => setBookingOpen(true)}
+          onClick={() => {
+            setActiveSlot({ ...selectedSlot, date: selectedDate })
+            setBookingOpen(true)
+          }}
           type="button"
         >
-          {selectedSlot ? 'Continue to booking' : 'Select a time to continue'}
+          {selectedSlot ? rescheduleFrom ? 'Continue to reschedule' : 'Continue to booking' : 'Select a time to continue'}
         </button>
         <p className="mt-3 text-center text-xs leading-5 text-slate-500">
           {status === 'authenticated'
-            ? 'No appointment is created until confirmation is available.'
+            ? rescheduleFrom ? 'Your current appointment stays unchanged until you confirm.' : 'No appointment is created until you confirm.'
             : 'You’ll sign in before confirming the appointment.'}
         </p>
       </div>
 
-      {bookingOpen && selectedSlot && (
+      {bookingOpen && activeSlot && (
         <BookingBoundaryDialog
           doctor={doctor}
           onClose={closeBooking}
-          slot={{ ...selectedSlot, date: selectedDate }}
+          onUnavailable={refreshUnavailable}
+          rescheduleFrom={rescheduleFrom}
+          slot={activeSlot}
         />
       )}
     </aside>
