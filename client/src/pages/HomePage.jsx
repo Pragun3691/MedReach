@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { DiscoverySearch } from '../components/DiscoverySearch.jsx'
-import { DoctorPreview } from '../components/DoctorPreview.jsx'
 import { PublicFooter } from '../components/PublicFooter.jsx'
 import { PublicHeader } from '../components/PublicHeader.jsx'
 import { getHomeDiscovery } from '../lib/api.js'
@@ -46,33 +45,33 @@ export function HomePage() {
 
   return (
     <div className="min-h-screen bg-white text-slate-950">
-      <PublicHeader />
-
-      <main>
-        <section className="overflow-hidden bg-[#f4f8fd]">
-          <div className="mx-auto grid max-w-7xl items-center gap-12 px-5 py-14 sm:px-8 sm:py-18 lg:grid-cols-[1.05fr_0.95fr] lg:px-10 lg:py-24">
-            <div className="max-w-2xl">
-              <p className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-800">
-                <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
-                Remote healthcare, made easier
-              </p>
-              <h1 className="mt-6 max-w-[680px] text-4xl font-bold leading-[1.08] tracking-[-0.04em] text-slate-950 sm:text-5xl lg:text-[58px]">
-                Find verified doctors and care that continues.
-              </h1>
-              <p className="mt-5 max-w-xl text-lg leading-8 text-slate-600">
-                Search by doctor, specialization or health concern. Compare professional details, choose an available slot and consult remotely.
-              </p>
-              <DiscoverySearch />
-              <p className="mt-4 text-sm text-slate-500">
-                Not for emergencies. If you need urgent help, contact your local emergency service.
-              </p>
+      <div className="relative">
+        <PublicHeader overlay />
+        <main>
+          <section className="relative isolate overflow-hidden bg-slate-950 text-white">
+            <img className="absolute inset-0 -z-20 size-full object-cover object-center" src="/medreach-hero.png" alt="Doctor preparing for a remote healthcare consultation" />
+            <div className="absolute inset-0 -z-10 bg-[linear-gradient(90deg,rgba(2,18,38,0.92)_0%,rgba(4,28,53,0.78)_42%,rgba(4,28,53,0.32)_100%)]" aria-hidden="true" />
+            <div className="mx-auto flex min-h-[700px] max-w-7xl items-end px-5 pb-16 pt-36 sm:px-8 sm:pb-20 lg:min-h-[780px] lg:px-10 lg:pb-24">
+              <div className="max-w-3xl">
+                <p className="inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/10 px-3 py-1.5 text-xs font-semibold text-blue-50 backdrop-blur-sm">
+                  <span className="size-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
+                  Remote healthcare, made easier
+                </p>
+                <h1 className="mt-6 max-w-3xl text-5xl font-bold leading-[1.02] tracking-[-0.05em] text-balance sm:text-6xl lg:text-[76px]">
+                  Find verified doctors and care that continues.
+                </h1>
+                <p className="mt-6 max-w-2xl text-lg leading-8 text-blue-50/90 sm:text-xl">
+                  Search by doctor, specialization or health concern. Compare professional details, choose an available slot and consult remotely.
+                </p>
+                <DiscoverySearch className="mt-8 max-w-3xl" />
+                <p className="mt-4 text-sm text-blue-100/75">
+                  Not for emergencies. If you need urgent help, contact your local emergency service.
+                </p>
+              </div>
             </div>
+          </section>
 
-            <DoctorPreview doctors={discovery.doctors} loading={loading} error={error} onRetry={retry} />
-          </div>
-        </section>
-
-        <section className="border-b border-slate-200 bg-white" aria-labelledby="specializations-heading">
+          <section className="border-b border-slate-200 bg-white" aria-labelledby="specializations-heading">
           <div className="mx-auto max-w-7xl px-5 py-11 sm:px-8 lg:px-10">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
@@ -154,7 +153,8 @@ export function HomePage() {
             </div>
           </div>
         </section>
-      </main>
+        </main>
+      </div>
 
       <PublicFooter />
     </div>

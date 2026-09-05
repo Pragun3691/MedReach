@@ -44,12 +44,23 @@ function NotificationEntry({ userId }) {
   )
 }
 
-export function PublicHeader() {
+export function PublicHeader({ overlay = false }) {
   const { status, currentUser, logout } = useAuth()
+  const [scrolled, setScrolled] = useState(false)
   const [logoutPending, setLogoutPending] = useState(false)
   const [logoutError, setLogoutError] = useState(false)
   const appointmentPath = currentUser?.role === 'doctor' ? '/doctor/appointments' : '/appointments'
   const appointmentLabel = currentUser?.role === 'doctor' ? 'Appointments' : 'My Appointments'
+
+  useEffect(() => {
+    if (!overlay) return undefined
+    function handleScroll() {
+      setScrolled(window.scrollY > 24)
+    }
+    handleScroll()
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [overlay])
 
   async function handleLogout() {
     setLogoutPending(true)
@@ -65,9 +76,9 @@ export function PublicHeader() {
   }
 
   return (
-    <header className="border-b border-slate-200/90 bg-white">
+    <header className={`${overlay ? `absolute inset-x-0 top-0 z-20 border-b ${scrolled ? 'border-slate-200/80 bg-white/95 shadow-sm backdrop-blur-md' : 'border-white/15 bg-slate-950/10 text-white backdrop-blur-[2px] [&_a]:text-white [&_button]:text-white [&_button]:border-white/60'}` : 'border-b border-slate-200/90 bg-white'} transition-colors duration-300`}>
       <div className="mx-auto flex min-h-18 max-w-7xl items-center justify-between gap-3 px-5 sm:px-8 lg:px-10">
-        <Brand />
+        <Brand inverse={overlay && !scrolled} />
 
         <nav className="flex items-center gap-1 sm:gap-3 lg:gap-5" aria-label="Primary navigation">
           <NavLink className={({ isActive }) => `hidden md:block ${navigationClass({ isActive })}`} to="/doctors">Find Doctors</NavLink>
