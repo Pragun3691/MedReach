@@ -26,17 +26,17 @@ export function DiscoverySearch({ initialType = 'problem', initialQuery = '', cl
   return (
     <form
       className={isHero
-        ? `${className} rounded-xl border border-white/25 bg-[#F8F6F1]/95 p-1.5 shadow-[0_16px_38px_-26px_rgba(2,12,27,0.76)] transition-[border-color,box-shadow] duration-300 focus-within:border-[#A8E6CF]`
-        : `${className} rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)]`}
+        ? `${className} w-full max-w-full rounded-xl border border-white/25 bg-[#F8F6F1]/95 p-1.5 shadow-[0_16px_38px_-26px_rgba(2,12,27,0.76)] transition-[border-color,box-shadow] duration-300 focus-within:border-[#A8E6CF]`
+        : `${className} w-full max-w-full rounded-2xl border border-slate-200 bg-white p-2 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)]`}
       onSubmit={handleSubmit}
       role="search"
     >
-      <div className={`grid gap-2 ${isHero ? 'sm:grid-cols-[170px_1fr_auto]' : 'sm:grid-cols-[180px_1fr_auto]'}`}>
+      <div className={`grid min-w-0 gap-2 ${isHero ? 'sm:grid-cols-[170px_1fr_auto]' : 'sm:grid-cols-[180px_1fr_auto]'}`}>
         <label className="sr-only" htmlFor="search-type">Search by</label>
         <select
           className={isHero
-            ? 'min-h-13 rounded-lg border-0 bg-[#efede7] px-4 text-sm font-medium text-slate-800 outline-none ring-[#0F2747] focus:ring-2'
-            : 'min-h-13 rounded-xl border-0 bg-slate-50 px-4 text-sm font-semibold text-slate-800 outline-none ring-blue-600 focus:ring-2'}
+            ? 'min-h-13 min-w-0 w-full rounded-lg border-0 bg-[#efede7] px-4 text-sm font-medium text-slate-800 outline-none ring-[#0F2747] focus:ring-2'
+            : 'min-h-13 min-w-0 w-full rounded-xl border-0 bg-slate-50 px-4 text-sm font-semibold text-slate-800 outline-none ring-blue-600 focus:ring-2'}
           id="search-type"
           value={searchType}
           onChange={event => setSearchType(event.target.value)}
@@ -46,7 +46,7 @@ export function DiscoverySearch({ initialType = 'problem', initialQuery = '', cl
           ))}
         </select>
 
-        <label className="relative block" htmlFor="doctor-search">
+        <label className="relative block min-w-0" htmlFor="doctor-search">
           <span className="sr-only">Search doctors</span>
           <svg
             className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-slate-400"
@@ -61,8 +61,8 @@ export function DiscoverySearch({ initialType = 'problem', initialQuery = '', cl
           </svg>
           <input
             className={isHero
-              ? 'min-h-13 w-full rounded-lg border-0 bg-white/90 px-11 text-base text-slate-950 outline-none placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-[#0F2747]'
-              : 'min-h-13 w-full rounded-xl border-0 px-11 text-base text-slate-950 outline-none placeholder:text-slate-400 focus:ring-2 focus:ring-blue-600'}
+              ? 'min-h-13 min-w-0 w-full rounded-lg border-0 bg-white/90 px-11 text-base text-slate-950 outline-none placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-[#0F2747]'
+              : 'min-h-13 min-w-0 w-full rounded-xl border-0 px-11 text-base text-slate-950 outline-none placeholder:text-slate-400 focus:ring-2 focus:ring-blue-600'}
             id="doctor-search"
             placeholder="Try “rash” or “Dermatology”"
             required
@@ -74,7 +74,7 @@ export function DiscoverySearch({ initialType = 'problem', initialQuery = '', cl
 
         <button
           className={isHero
-            ? 'group inline-flex min-h-13 items-center justify-center gap-3 rounded-lg bg-[#0F2747] px-7 text-sm font-semibold text-white transition-[background-color,transform] duration-250 hover:-translate-y-0.5 hover:bg-[#173960] focus:outline-none focus:ring-2 focus:ring-[#0F2747] focus:ring-offset-2 active:translate-y-0'
+            ? 'primary-cta group inline-flex min-h-13 items-center justify-center gap-3 rounded-lg bg-[#0F2747] px-7 text-sm font-semibold text-white hover:bg-[#173960] focus:outline-none focus:ring-2 focus:ring-[#0F2747] focus:ring-offset-2'
             : 'inline-flex min-h-13 items-center justify-center rounded-xl bg-blue-700 px-7 text-sm font-semibold text-white transition-colors hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2'}
           type="submit"
         >

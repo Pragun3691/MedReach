@@ -10,10 +10,10 @@ function firstName(fullName) {
 
 function navigationClass({ isActive }, inverse = false) {
   if (inverse) {
-    return `text-sm font-medium transition-colors duration-250 hover:text-white ${isActive ? 'text-[#A8E6CF]' : 'text-white/80'}`
+    return `header-link text-sm font-medium hover:text-white ${isActive ? 'text-[#A8E6CF]' : 'text-white/80'}`
   }
 
-  return `text-sm font-medium transition-colors duration-250 hover:text-[#173960] ${isActive ? 'text-[#173960]' : 'text-slate-700'}`
+  return `header-link text-sm font-medium hover:text-[#173960] ${isActive ? 'text-[#173960]' : 'text-slate-700'}`
 }
 
 function NotificationEntry({ userId, inverse = false }) {
@@ -84,17 +84,17 @@ export function PublicHeader({ overlay = false }) {
 
   return (
     <header className={`${overlay ? 'fixed inset-x-0 top-0 z-50' : 'relative'} border-b transition-[background-color,border-color,box-shadow,backdrop-filter] duration-300 ${inverse ? 'border-white/15 bg-transparent' : 'border-slate-200/90 bg-[#F8F6F1]/95 shadow-[0_10px_30px_-24px_rgba(15,39,71,0.7)] backdrop-blur-md'}`}>
-      <div className={`mx-auto flex max-w-7xl items-center justify-between gap-3 px-5 transition-[min-height] duration-300 sm:px-8 lg:px-10 ${hasScrolled ? 'min-h-16' : 'min-h-20'}`}>
+      <div className={`mx-auto flex max-w-7xl items-center justify-between gap-3 px-5 transition-[min-height] duration-300 sm:px-8 lg:px-10 ${hasScrolled ? 'min-h-16' : 'min-h-[4.75rem]'}`}>
         <Brand inverse={inverse} />
 
-        <nav className="flex items-center gap-2 sm:gap-5 lg:gap-7" aria-label="Primary navigation">
+        <nav className="flex items-center gap-3 sm:gap-5 lg:gap-8" aria-label="Primary navigation">
           <NavLink className={({ isActive }) => `hidden md:block ${navigationClass({ isActive }, inverse)}`} to="/doctors">Find Doctors</NavLink>
           {status === 'authenticated' && currentUser && <NavLink className={({ isActive }) => `hidden md:block ${navigationClass({ isActive }, inverse)}`} to={appointmentPath}>{appointmentLabel}</NavLink>}
           {status === 'loading' && <span className={`h-10 w-28 animate-pulse rounded-lg ${inverse ? 'bg-white/15' : 'bg-slate-100'}`} aria-label="Checking sign-in status" />}
           {status === 'anonymous' && (
             <>
-              <Link className={`text-sm font-medium transition-colors duration-250 ${inverse ? 'text-white/80 hover:text-white' : 'text-slate-700 hover:text-[#173960]'}`} to="/login">Login</Link>
-              <Link className={`inline-flex min-h-10 items-center justify-center rounded-full border px-4 text-sm font-medium tracking-[-0.01em] transition-[background-color,color,transform,border-color] duration-250 hover:-translate-y-0.5 sm:px-5 ${inverse ? 'border-white/45 text-white hover:border-white hover:bg-white hover:text-[#0F2747]' : 'border-[#173960]/70 text-[#173960] hover:border-[#173960] hover:bg-[#173960] hover:text-white'}`} to="/register">Register</Link>
+              <Link className={`header-link text-sm font-medium ${inverse ? 'text-white/80 hover:text-white' : 'text-slate-700 hover:text-[#173960]'}`} to="/login">Login</Link>
+              <Link className={`header-cta inline-flex min-h-10 items-center justify-center rounded-full border px-4 text-sm font-medium tracking-[-0.01em] sm:px-5 ${inverse ? 'border-white/45 text-white hover:border-white hover:bg-white hover:text-[#0F2747]' : 'border-[#173960]/55 text-[#173960] hover:border-[#173960] hover:bg-[#173960] hover:text-white'}`} to="/register">Register</Link>
             </>
           )}
           {status === 'authenticated' && currentUser && (
