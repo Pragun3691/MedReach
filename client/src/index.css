@@ -31,3 +31,56 @@ select {
   background: #bfdbfe;
   color: #172554;
 }
+
+.hero-image-overlay {
+  background:
+    linear-gradient(90deg, rgba(7, 24, 45, 0.96) 0%, rgba(10, 32, 58, 0.88) 39%, rgba(10, 31, 55, 0.36) 67%, rgba(7, 20, 35, 0.16) 100%),
+    linear-gradient(0deg, rgba(5, 18, 34, 0.52) 0%, transparent 46%);
+}
+
+.hero-image {
+  animation: hero-image-reveal 900ms cubic-bezier(0.16, 1, 0.3, 1) both,
+    hero-image-drift 18s ease-in-out 900ms infinite alternate;
+}
+
+.hero-reveal {
+  animation: hero-content-reveal 650ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.hero-reveal--1 { animation-delay: 160ms; }
+.hero-reveal--2 { animation-delay: 240ms; }
+.hero-reveal--3 { animation-delay: 330ms; }
+.hero-reveal--4 { animation-delay: 430ms; }
+.hero-reveal--5 { animation-delay: 520ms; }
+
+@keyframes hero-image-reveal {
+  from { opacity: 0; transform: scale(1.035); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes hero-image-drift {
+  from { transform: scale(1); }
+  to { transform: scale(1.025); }
+}
+
+@keyframes hero-content-reveal {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 639px) {
+  .hero-image-overlay {
+    background:
+      linear-gradient(90deg, rgba(7, 24, 45, 0.93) 0%, rgba(8, 27, 50, 0.78) 70%, rgba(7, 23, 42, 0.58) 100%),
+      linear-gradient(0deg, rgba(5, 18, 34, 0.72) 0%, rgba(5, 18, 34, 0.08) 66%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+
+  .hero-image,
+  .hero-reveal {
+    animation: none;
+  }
+}

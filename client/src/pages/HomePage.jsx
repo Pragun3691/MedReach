@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import heroImage from '../assets/medreach-home-hero.jpg'
 import { DiscoverySearch } from '../components/DiscoverySearch.jsx'
-import { DoctorPreview } from '../components/DoctorPreview.jsx'
 import { PublicFooter } from '../components/PublicFooter.jsx'
 import { PublicHeader } from '../components/PublicHeader.jsx'
 import { getHomeDiscovery } from '../lib/api.js'
@@ -46,29 +46,35 @@ export function HomePage() {
 
   return (
     <div className="min-h-screen bg-white text-slate-950">
-      <PublicHeader />
+      <PublicHeader overlay />
 
       <main>
-        <section className="overflow-hidden bg-[#f4f8fd]">
-          <div className="mx-auto grid max-w-7xl items-center gap-12 px-5 py-14 sm:px-8 sm:py-18 lg:grid-cols-[1.05fr_0.95fr] lg:px-10 lg:py-24">
-            <div className="max-w-2xl">
-              <p className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-800">
-                <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
-                Remote healthcare, made easier
+        <section className="relative isolate flex min-h-[88svh] overflow-hidden bg-[#0F2747] text-white" aria-labelledby="home-hero-heading">
+          <img
+            alt="A doctor providing remote care from her consultation room"
+            className="hero-image absolute inset-0 -z-20 size-full object-cover object-[72%_center] sm:object-[70%_center] lg:object-right"
+            fetchPriority="high"
+            src={heroImage}
+          />
+          <div className="hero-image-overlay absolute inset-0 -z-10" aria-hidden="true" />
+
+          <div className="mx-auto flex w-full max-w-7xl items-end px-5 pb-12 pt-32 sm:px-8 sm:pb-16 sm:pt-36 lg:px-10 lg:pb-20 lg:pt-40">
+            <div className="w-full max-w-4xl">
+              <p className="hero-reveal hero-reveal--1 flex items-center gap-3 text-xs font-bold tracking-[0.18em] text-[#A8E6CF] sm:text-sm">
+                <span className="h-px w-8 bg-[#A8E6CF]" aria-hidden="true" />
+                REMOTE CARE, MADE CLEARER
               </p>
-              <h1 className="mt-6 max-w-[680px] text-4xl font-bold leading-[1.08] tracking-[-0.04em] text-slate-950 sm:text-5xl lg:text-[58px]">
-                Find verified doctors and care that continues.
+              <h1 className="hero-reveal hero-reveal--2 mt-5 max-w-3xl text-[2.4rem] font-medium leading-[1.04] tracking-[-0.04em] text-white sm:text-[3.5rem] lg:text-[4rem]" id="home-hero-heading">
+                Care that continues, wherever you are.
               </h1>
-              <p className="mt-5 max-w-xl text-lg leading-8 text-slate-600">
-                Search by doctor, specialization or health concern. Compare professional details, choose an available slot and consult remotely.
+              <p className="hero-reveal hero-reveal--3 mt-5 max-w-2xl text-base leading-7 text-white/78 sm:text-lg sm:leading-8">
+                Find verified doctors, view real availability, book remote consultations and keep follow-up care connected.
               </p>
-              <DiscoverySearch />
-              <p className="mt-4 text-sm text-slate-500">
+              <DiscoverySearch className="hero-reveal hero-reveal--4 mt-7 sm:mt-9" tone="hero" />
+              <p className="hero-reveal hero-reveal--5 mt-4 text-xs leading-5 text-white/68 sm:text-sm">
                 Not for emergencies. If you need urgent help, contact your local emergency service.
               </p>
             </div>
-
-            <DoctorPreview doctors={discovery.doctors} loading={loading} error={error} onRetry={retry} />
           </div>
         </section>
 
