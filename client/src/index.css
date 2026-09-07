@@ -225,6 +225,120 @@ select {
   min-width: 0;
 }
 
+/* Patient appointment schedule */
+.patient-appointments-page { background: #f8f6f1; color: #0f2747; }
+.patient-appointments-shell { width: min(100%, 80rem); margin: 0 auto; padding: clamp(2.3rem, 5vw, 4.6rem) 2.5rem 6rem; }
+.patient-appointments__intro { max-width: 45rem; }
+.patient-appointments__intro > p,
+.patient-appointments__section-heading > div > p { color: #2c7a68; font-size: 0.71rem; font-weight: 750; letter-spacing: 0.17em; text-transform: uppercase; }
+.patient-appointments__intro h1 { margin-top: 0.65rem; color: #0f2747; font-size: clamp(2.4rem, 5vw, 3.75rem); font-weight: 650; line-height: 1.04; letter-spacing: -0.05em; }
+.patient-appointments__intro > span { display: block; max-width: 38rem; margin-top: 1rem; color: #5d6c68; font-size: 1rem; line-height: 1.75; }
+.patient-appointments__sections { display: grid; gap: clamp(3.5rem, 7vw, 6.25rem); margin-top: clamp(2.5rem, 4.5vw, 4.1rem); }
+.patient-appointments__section-heading { display: flex; align-items: end; justify-content: space-between; gap: 1.5rem; border-bottom: 1px solid rgba(15, 39, 71, 0.2); padding-bottom: 1rem; }
+.patient-appointments__section-heading h2 { margin-top: 0.3rem; font-size: clamp(1.75rem, 3vw, 2.25rem); font-weight: 640; line-height: 1.1; letter-spacing: -0.04em; }
+.patient-appointments__section-heading > span { color: #74807c; font-size: 0.82rem; }
+.patient-upcoming-list { display: grid; gap: 0.9rem; margin-top: 1.4rem; }
+.patient-upcoming { border: 1px solid rgba(15, 39, 71, 0.14); border-radius: 0.7rem; background: #fffdf9; padding: 1.35rem 1.45rem 1.45rem; box-shadow: 0 18px 44px -40px rgba(15, 39, 71, 0.65); transition: border-color 200ms ease, background-color 200ms ease; }
+.patient-upcoming[data-featured] { border-color: rgba(44, 122, 104, 0.34); background: #fffefa; }
+.patient-upcoming:hover { border-color: rgba(44, 122, 104, 0.52); }
+.patient-upcoming__topline { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.patient-upcoming__topline > p { color: #5c7770; font-size: 0.68rem; font-weight: 760; letter-spacing: 0.15em; text-transform: uppercase; }
+.patient-upcoming__body { display: grid; grid-template-columns: 6.5rem minmax(11.5rem, 1.25fr) minmax(13rem, 1fr) minmax(9.5rem, 0.65fr); gap: clamp(1.15rem, 2vw, 1.75rem); align-items: center; margin-top: 1.15rem; }
+.patient-upcoming__portrait,
+.patient-history__portrait { display: grid; overflow: hidden; aspect-ratio: 4 / 5; place-items: center; border-radius: 0.55rem; background: #dce9e2; color: #245f54; font-size: 1.3rem; font-weight: 650; letter-spacing: 0.055em; }
+.patient-upcoming__portrait { width: 6.5rem; }
+.patient-upcoming__portrait img,
+.patient-history__portrait img { width: 100%; height: 100%; object-fit: cover; }
+.patient-upcoming__identity h3,
+.patient-history__identity h3 { color: #0f2747; font-weight: 620; line-height: 1.16; letter-spacing: -0.035em; }
+.patient-upcoming__identity h3 { font-size: 1.5rem; }
+.patient-upcoming__identity p,
+.patient-history__identity p { margin-top: 0.3rem; color: #2c7a68; font-size: 0.82rem; font-weight: 650; }
+.patient-upcoming__schedule { display: grid; gap: 0.24rem; color: #0f2747; }
+.patient-upcoming__schedule > p { font-size: 1.08rem; font-weight: 650; letter-spacing: -0.02em; }
+.patient-upcoming__schedule > strong { font-size: 0.92rem; font-weight: 680; }
+.patient-upcoming__schedule > span { margin-top: 0.48rem; color: #68736f; font-size: 0.8rem; }
+.patient-upcoming__decision { display: grid; justify-items: end; gap: 1.15rem; }
+.patient-upcoming__decision > p { color: #40514d; font-size: 0.9rem; font-weight: 680; }
+.patient-upcoming__decision a,
+.patient-history__link,
+.patient-appointments__empty a { display: inline-flex; align-items: center; gap: 0.55rem; color: #0f2747; font-size: 0.86rem; font-weight: 720; text-decoration: none; }
+.patient-upcoming__decision a span,
+.patient-history__link span,
+.patient-appointments__empty a span { transition: transform 200ms ease; }
+.patient-upcoming__decision a:hover span,
+.patient-history__link:hover span,
+.patient-appointments__empty a:hover span { transform: translateX(4px); }
+.patient-upcoming__decision a:focus-visible,
+.patient-history__link:focus-visible,
+.patient-appointments__empty a:focus-visible { border-radius: 2px; outline: 2px solid #2c7a68; outline-offset: 5px; }
+.patient-appointment-status { display: inline-flex; width: max-content; align-items: center; border: 1px solid transparent; border-radius: 999px; padding: 0.3rem 0.62rem; font-size: 0.69rem; font-weight: 720; letter-spacing: 0.015em; line-height: 1; }
+.patient-appointment-status[data-status='booked'],
+.patient-appointment-status[data-status='completed'] { border-color: #b9d1c5; background: #e8f0eb; color: #275f51; }
+.patient-appointment-status[data-status='rescheduled'] { border-color: #c8d1d6; background: #edf0f1; color: #50636c; }
+.patient-appointment-status[data-status='cancelled'] { border-color: #dfc4bc; background: #f6ebe7; color: #895247; }
+.patient-appointment-status[data-status='no_show'] { border-color: #d9c9ae; background: #f4efe5; color: #745f3b; }
+.patient-appointment-status[data-status='awaiting_outcome'] { border-color: #d8c9ad; background: #f5efe3; color: #725d38; }
+.patient-history-list { margin-top: 0.35rem; }
+.patient-history { display: grid; grid-template-columns: 3.65rem minmax(11rem, 1fr) minmax(14rem, 1fr) minmax(8.5rem, 0.65fr) auto; gap: clamp(1rem, 2.4vw, 2.2rem); align-items: center; min-height: 6.5rem; border-bottom: 1px solid rgba(15, 39, 71, 0.13); padding: 1rem 0.55rem; transition: border-color 180ms ease, background-color 180ms ease; }
+.patient-history:hover { border-color: rgba(44, 122, 104, 0.38); background: rgba(255, 253, 249, 0.55); }
+.patient-history__portrait { width: 3.65rem; border-radius: 0.42rem; font-size: 0.92rem; }
+.patient-history__identity h3 { font-size: 1.05rem; }
+.patient-history__schedule { color: #485955; font-size: 0.84rem; font-weight: 570; }
+.patient-history__link { justify-self: end; }
+.patient-appointments__empty { border-bottom: 1px solid rgba(15, 39, 71, 0.16); padding: 2.3rem 0.25rem; }
+.patient-appointments__empty h3 { font-size: 1.25rem; font-weight: 640; letter-spacing: -0.025em; }
+.patient-appointments__empty p { margin-top: 0.55rem; color: #65736f; font-size: 0.9rem; }
+.patient-appointments__empty a { margin-top: 1rem; }
+.patient-appointments__empty--quiet { padding-block: 1.8rem; }
+.patient-appointments__loading { display: grid; gap: 1rem; margin-top: 4rem; }
+.patient-appointments__loading div { height: 7.5rem; border: 1px solid #e3ded5; border-radius: 0.65rem; background: #fffdf9; }
+.patient-appointments__error { margin-top: 3.5rem; border: 1px solid #dfc4bc; background: #fffdf9; padding: 2rem; text-align: center; }
+.patient-appointments__error h2 { font-size: 1.45rem; font-weight: 640; letter-spacing: -0.03em; }
+.patient-appointments__error p { margin-top: 0.5rem; color: #65736f; }
+.patient-appointments__error button { margin-top: 1.2rem; border: 1px solid #0f2747; padding: 0.65rem 1rem; color: #0f2747; font-size: 0.85rem; font-weight: 700; }
+
+@media (max-width: 860px) {
+  .patient-upcoming__body { grid-template-columns: 5.7rem minmax(0, 1fr) auto; }
+  .patient-upcoming__portrait { width: 5.7rem; }
+  .patient-upcoming__schedule { grid-column: 2; }
+  .patient-upcoming__decision { grid-column: 3; grid-row: 2; }
+  .patient-history { grid-template-columns: 3.5rem minmax(10rem, 1fr) minmax(12rem, 1fr) auto; }
+  .patient-history__status { grid-column: 2; }
+  .patient-history__link { grid-column: 4; grid-row: 1 / span 2; }
+}
+
+@media (max-width: 639px) {
+  .patient-appointments-shell { padding: 2rem 1.25rem 4.5rem; }
+  .patient-appointments__intro h1 { font-size: 2.55rem; }
+  .patient-appointments__intro > span { font-size: 0.92rem; line-height: 1.65; }
+  .patient-appointments__sections { gap: 3.75rem; margin-top: 2.65rem; }
+  .patient-appointments__section-heading h2 { font-size: 1.9rem; }
+  .patient-appointments__section-heading > span { padding-bottom: 0.15rem; font-size: 0.72rem; }
+  .patient-upcoming { padding: 1rem; }
+  .patient-upcoming__body { grid-template-columns: 5rem minmax(0, 1fr); gap: 1rem; }
+  .patient-upcoming__portrait { width: 5rem; }
+  .patient-upcoming__identity h3 { font-size: 1.32rem; }
+  .patient-upcoming__schedule { grid-column: 1 / -1; margin-top: 0.35rem; }
+  .patient-upcoming__schedule > p { font-size: 1.08rem; }
+  .patient-upcoming__decision { display: flex; grid-column: 1 / -1; grid-row: auto; align-items: center; justify-content: space-between; margin-top: 0.3rem; border-top: 1px solid rgba(15, 39, 71, 0.12); padding-top: 0.9rem; }
+  .patient-history { grid-template-columns: 3.25rem minmax(0, 1fr) auto; gap: 0.75rem 0.9rem; min-height: 0; padding: 0.9rem 0; }
+  .patient-history__portrait { width: 3.25rem; grid-row: 1 / span 2; }
+  .patient-history__identity h3 { font-size: 1rem; }
+  .patient-history__identity p { font-size: 0.74rem; }
+  .patient-history__schedule { grid-column: 2 / -1; font-size: 0.77rem; }
+  .patient-history__status { grid-column: 2; }
+  .patient-history__link { grid-column: 3; grid-row: 3; font-size: 0.76rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .patient-upcoming,
+  .patient-history,
+  .patient-upcoming__decision a span,
+  .patient-history__link span,
+  .patient-appointments__empty a span { transition: none; }
+}
+
 .discovery-control__trigger {
   display: inline-flex;
   width: 100%;
