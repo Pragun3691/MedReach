@@ -7,10 +7,70 @@ import { listNotifications, markNotificationRead } from '../lib/api.js'
 import { safeInternalReturnTo } from '../lib/navigation.js'
 
 const pageSize = 20
+const notificationDetails = {
+  appointment_booked: { label: 'Booking', title: 'Appointment confirmed', icon: 'check' },
+  appointment_rescheduled: { label: 'Reschedule', title: 'Appointment rescheduled', icon: 'arrow' },
+  appointment_cancelled: { label: 'Cancellation', title: 'Appointment cancelled', icon: 'cancel' },
+}
+const dayFormatter = new Intl.DateTimeFormat('en-CA', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  timeZone: 'Asia/Kolkata',
+})
+
+function isToday(value) {
+  return dayFormatter.format(new Date(value)) === dayFormatter.format(new Date())
+}
+
+function NotificationIcon({ type }) {
+  const kind = notificationDetails[type]?.icon ?? 'check'
+
+  if (kind === 'arrow') {
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10l-2.5-2.5M17 17H7l2.5 2.5" /><path d="M17 7l2 2-2 2M7 17l-2-2 2-2" /></svg>
+  }
+  if (kind === 'cancel') {
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v3M18 4v3M4 9h16M5 6h14v14H5z" /><path d="m9 12 6 5m0-5-6 5" /></svg>
+  }
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v3M18 4v3M4 9h16M5 6h14v14H5z" /><path d="m9 14 2 2 4-5" /></svg>
+}
+
+function NotificationRow({ notification, markingRead, onMarkRead }) {
+  const details = notificationDetails[notification.type] ?? { label: 'Update', title: 'Appointment update' }
+  const actionPath = safeInternalReturnTo(notification.actionPath, null)
+
+  return (
+    <li className="notification-row" data-unread={!notification.isRead}>
+      <article aria-label={`${notification.isRead ? 'Read' : 'Unread'} notification: ${details.title}`}>
+        <div className="notification-row__marker" aria-hidden="true">
+          {!notification.isRead && <span />}
+        </div>
+        <div className="notification-row__icon"><NotificationIcon type={notification.type} /></div>
+        <div className="notification-row__body">
+          <div className="notification-row__meta">
+            <span>{details.label}</span>
+            <time dateTime={notification.createdAt}>{formatNotificationTime(notification.createdAt)}</time>
+          </div>
+          <h3>{details.title}</h3>
+          <p>{notification.message}</p>
+          <div className="notification-row__actions">
+            {actionPath && <Link to={actionPath}>View appointment <span aria-hidden="true">→</span></Link>}
+            {!notification.isRead && (
+              <button disabled={markingRead} onClick={() => onMarkRead(notification.id)} type="button">
+                {markingRead ? 'Marking…' : 'Mark as read'}
+              </button>
+            )}
+          </div>
+        </div>
+      </article>
+    </li>
+  )
+}
 
 export function NotificationsPage() {
   const [requestVersion, setRequestVersion] = useState(0)
   const [state, setState] = useState({ key: null, data: null, error: null })
+  const [markingReadIds, setMarkingReadIds] = useState(() => new Set())
   const retry = useCallback(() => setRequestVersion(version => version + 1), [])
   const requestKey = String(requestVersion)
 
@@ -26,6 +86,7 @@ export function NotificationsPage() {
   }, [requestKey])
 
   async function markRead(notificationId) {
+    setMarkingReadIds(current => new Set(current).add(notificationId))
     try {
       const { notification } = await markNotificationRead(notificationId)
       setState(current => ({
@@ -39,62 +100,72 @@ export function NotificationsPage() {
       window.dispatchEvent(new Event('medreach:notifications-changed'))
     } catch (error) {
       setState(current => ({ ...current, error }))
+    } finally {
+      setMarkingReadIds(current => {
+        const next = new Set(current)
+        next.delete(notificationId)
+        return next
+      })
     }
   }
 
   const loading = state.key !== requestKey
+  const groups = !loading && state.data
+    ? [
+        { label: 'Today', items: state.data.items.filter(item => isToday(item.createdAt)) },
+        { label: 'Earlier', items: state.data.items.filter(item => !isToday(item.createdAt)) },
+      ].filter(group => group.items.length > 0)
+    : []
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950">
-      <PublicHeader />
-      <main className="mx-auto max-w-3xl px-5 py-10 sm:px-8 lg:py-14">
-        <div className="mb-8">
-          <p className="text-sm font-semibold text-blue-700">Updates</p>
-          <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
-            <h1 className="text-3xl font-bold tracking-[-0.035em] sm:text-4xl">Notifications</h1>
-            {!loading && state.data && <span className="text-sm text-slate-500">{state.data.unreadCount} unread</span>}
+    <div className="notifications-page min-h-screen">
+      <PublicHeader editorial />
+      <main className="notifications-main">
+        <header className="notifications-intro">
+          <div>
+            <p>Care updates</p>
+            <h1>Notifications</h1>
+            <span>Important updates about your appointments and care.</span>
           </div>
-          <p className="mt-3 leading-7 text-slate-600">Booking, cancellation and rescheduling updates for your account.</p>
-        </div>
+          {!loading && state.data && (
+            <strong aria-label={`${state.data.unreadCount} unread notifications`}>{state.data.unreadCount} unread</strong>
+          )}
+        </header>
 
-        {loading && <div className="space-y-3" aria-label="Loading notifications">{[1, 2, 3].map(item => <div className="h-28 animate-pulse rounded-xl bg-white" key={item} />)}</div>}
+        {loading && <div className="notification-loading" aria-label="Loading notifications">{[1, 2, 3].map(item => <div key={item} />)}</div>}
         {!loading && state.error && (
-          <div className="rounded-2xl border border-amber-200 bg-white p-8 text-center">
-            <h2 className="text-xl font-semibold">We couldn’t load notifications</h2>
-            <p className="mt-2 text-slate-600">{state.error.message}</p>
-            <button className="mt-5 min-h-11 rounded-lg bg-blue-700 px-5 text-sm font-semibold text-white" onClick={retry} type="button">Try again</button>
+          <div className="notifications-message" role="alert">
+            <h2>We couldn’t load notifications</h2>
+            <p>{state.error.message}</p>
+            <button onClick={retry} type="button">Try again</button>
           </div>
         )}
         {!loading && state.data?.items.length === 0 && (
-          <div className="rounded-2xl border border-slate-200 bg-white px-6 py-14 text-center">
-            <div className="mx-auto grid size-12 place-items-center rounded-full bg-blue-50 text-blue-700" aria-hidden="true">✓</div>
-            <h2 className="mt-4 text-xl font-semibold">You’re all caught up</h2>
-            <p className="mt-2 text-slate-600">New appointment updates will appear here.</p>
+          <div className="notifications-empty">
+            <h2>No updates yet</h2>
+            <p>Important appointment and account updates will appear here.</p>
           </div>
         )}
         {!loading && state.data?.items.length > 0 && (
-          <ul className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-            {state.data.items.map(notification => {
-              const actionPath = safeInternalReturnTo(notification.actionPath, null)
-              return (
-                <li className={`border-b border-slate-100 p-5 last:border-b-0 sm:p-6 ${notification.isRead ? 'bg-white' : 'bg-blue-50/55'}`} key={notification.id}>
-                  <div className="flex gap-4">
-                    <span className={`mt-1 size-2.5 shrink-0 rounded-full ${notification.isRead ? 'bg-slate-200' : 'bg-blue-600'}`} aria-hidden="true" />
-                    <div className="min-w-0 flex-1">
-                      <p className="leading-7 text-slate-800">{notification.message}</p>
-                      <p className="mt-1 text-xs text-slate-500">{formatNotificationTime(notification.createdAt)}</p>
-                      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm font-semibold">
-                        {actionPath && <Link className="text-blue-700 hover:text-blue-800" to={actionPath}>View appointment</Link>}
-                        {!notification.isRead && <button className="text-slate-600 hover:text-blue-700" onClick={() => markRead(notification.id)} type="button">Mark as read</button>}
-                      </div>
-                    </div>
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
+          <div className="notification-feed">
+            {groups.map(group => (
+              <section aria-labelledby={`notification-group-${group.label.toLowerCase()}`} key={group.label}>
+                <h2 id={`notification-group-${group.label.toLowerCase()}`}>{group.label}</h2>
+                <ul>
+                  {group.items.map(notification => (
+                    <NotificationRow
+                      key={notification.id}
+                      markingRead={markingReadIds.has(notification.id)}
+                      notification={notification}
+                      onMarkRead={markRead}
+                    />
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
         )}
-        {!loading && state.data?.total > pageSize && <p className="mt-5 text-center text-sm text-slate-500">Showing the newest {pageSize} of {state.data.total} notifications.</p>}
+        {!loading && state.data?.total > pageSize && <p className="notifications-page-count">Showing the newest {pageSize} of {state.data.total} notifications.</p>}
       </main>
       <PublicFooter />
     </div>

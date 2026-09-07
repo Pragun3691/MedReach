@@ -70,26 +70,26 @@ export function LoginPage() {
   const registerParams = new URLSearchParams()
   if (returnTo !== '/') registerParams.set('returnTo', returnTo)
   const registerUrl = `/register${registerParams.size ? `?${registerParams.toString()}` : ''}`
+  const bookingReturnUrl = new URL(returnTo, 'https://medreach.local')
+  const hasBookingContext = /^\/doctors\/\d+$/.test(bookingReturnUrl.pathname)
+    && bookingReturnUrl.searchParams.has('date')
+    && bookingReturnUrl.searchParams.has('slot')
 
   return (
-    <AuthPageFrame
-      aside={(
-        <div className="mt-8 border-t border-slate-200 pt-6">
-          <p className="text-sm font-semibold text-slate-900">A secure path back to your care</p>
-          <p className="mt-2 max-w-md text-sm leading-6 text-slate-600">
-            Your session stays on the server and your selected doctor and date remain ready when you return.
-          </p>
+    <AuthPageFrame variant="editorial">
+      <section className="auth-workspace" aria-labelledby="login-form-heading">
+        <div className="auth-workspace__intro">
+          <p>Welcome back</p>
+          <h1 id="login-form-heading">Sign in to MedReach</h1>
+          <span>Access your appointments and continue your care.</span>
         </div>
-      )}
-      description="Access MedReach with the email and password you used when creating your account."
-      eyebrow="Welcome back"
-      title="Sign in to continue"
-    >
-      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_20px_55px_-42px_rgba(15,23,42,0.55)] sm:p-8" aria-labelledby="login-form-heading">
-        <div>
-          <p className="text-sm font-semibold text-blue-700">MedReach account</p>
-          <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950" id="login-form-heading">Login</h2>
-        </div>
+
+        {hasBookingContext && (
+          <div className="auth-context" role="status">
+            <p>Your appointment is waiting</p>
+            <span>Your selected appointment will still be here after you sign in.</span>
+          </div>
+        )}
 
         {registered && (
           <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-900" role="status">
@@ -133,16 +133,16 @@ export function LoginPage() {
             visible={passwordVisible}
           />
           <button
-            className="inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-blue-700 px-5 text-sm font-semibold text-white hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 disabled:cursor-wait disabled:bg-blue-400"
+            className="auth-submit"
             disabled={submitting}
             type="submit"
           >
-            {submitting ? 'Signing in…' : 'Sign in'}
+            {submitting ? 'Signing in…' : 'Sign in →'}
           </button>
         </form>
 
-        <p className="mt-6 border-t border-slate-200 pt-5 text-center text-sm text-slate-600">
-          New to MedReach? <Link className="font-semibold text-blue-700 hover:text-blue-800" to={registerUrl}>Create an account</Link>
+        <p className="auth-switch">
+          New to MedReach? <Link to={registerUrl}>Create an account →</Link>
         </p>
       </section>
     </AuthPageFrame>

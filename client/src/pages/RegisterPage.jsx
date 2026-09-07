@@ -21,6 +21,8 @@ const initialDoctor = {
   defaultFee: '',
 }
 
+const doctorStepOneFields = ['fullName', 'email', 'password', 'confirmPassword', 'qualification', 'experienceYears']
+
 function validateBase(values) {
   const errors = {}
   if (values.fullName.trim().length < 2) errors.fullName = 'Enter your full name.'
@@ -46,6 +48,11 @@ function validateDoctor(values) {
   return errors
 }
 
+function validateDoctorStepOne(values) {
+  const errors = validateDoctor(values)
+  return Object.fromEntries(Object.entries(errors).filter(([field]) => doctorStepOneFields.includes(field)))
+}
+
 function optional(value) {
   const normalized = value.trim()
   return normalized || undefined
@@ -67,7 +74,7 @@ function ErrorSummary({ errors }) {
 
 export function RegisterPage() {
   const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
+  const [searchParams] = useSearchParams()
   const role = searchParams.get('role') === 'doctor' ? 'doctor' : 'patient'
   const returnTo = safeInternalReturnTo(searchParams.get('returnTo'))
   const [patient, setPatient] = useState(initialPatient)
@@ -79,6 +86,7 @@ export function RegisterPage() {
   const [submitting, setSubmitting] = useState(false)
   const [specializations, setSpecializations] = useState([])
   const [specializationError, setSpecializationError] = useState('')
+  const [doctorStep, setDoctorStep] = useState(1)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -92,15 +100,6 @@ export function RegisterPage() {
 
   const values = role === 'doctor' ? doctor : patient
   const setValues = role === 'doctor' ? setDoctor : setPatient
-
-  function switchRole(nextRole) {
-    const next = new URLSearchParams(searchParams)
-    if (nextRole === 'doctor') next.set('role', 'doctor')
-    else next.delete('role')
-    setSearchParams(next, { replace: true })
-    setErrors({})
-    setApiError('')
-  }
 
   function update(field, value) {
     setValues(current => ({ ...current, [field]: value }))
@@ -119,12 +118,47 @@ export function RegisterPage() {
     setErrors(current => ({ ...current, specializationIds: undefined }))
   }
 
+  function focusFirstInvalid(nextErrors) {
+    const firstField = Object.keys(nextErrors)[0]
+    if (!firstField) return
+    requestAnimationFrame(() => {
+      const target = firstField === 'specializationIds'
+        ? document.querySelector('#register-specializationIds input')
+        : document.getElementById(`register-${firstField}`)
+      target?.focus()
+    })
+  }
+
+  function continueDoctorRegistration() {
+    const nextErrors = validateDoctorStepOne(doctor)
+    setErrors(current => ({
+      ...current,
+      ...Object.fromEntries(doctorStepOneFields.map(field => [field, undefined])),
+      ...nextErrors,
+    }))
+
+    if (Object.keys(nextErrors).length > 0) {
+      focusFirstInvalid(nextErrors)
+      return
+    }
+
+    setApiError('')
+    setDoctorStep(2)
+    requestAnimationFrame(() => document.getElementById('register-form-heading')?.focus())
+  }
+
   async function handleSubmit(event) {
     event.preventDefault()
+    if (role === 'doctor' && doctorStep === 1) {
+      continueDoctorRegistration()
+      return
+    }
     const nextErrors = role === 'doctor' ? validateDoctor(values) : validateBase(values)
 
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors)
+      if (role === 'doctor' && doctorStepOneFields.some(field => nextErrors[field])) setDoctorStep(1)
+      focusFirstInvalid(nextErrors)
       return
     }
 
@@ -161,6 +195,8 @@ export function RegisterPage() {
       if (error.code === 'EMAIL_IN_USE') {
         setErrors({ email: 'An account with this email already exists.' })
         setApiError('This email is already registered. Try logging in instead.')
+        if (role === 'doctor') setDoctorStep(1)
+        focusFirstInvalid({ email: true })
       } else if (error.code === 'INVALID_SPECIALIZATION') {
         setErrors({ specializationIds: 'One of the selected specializations is no longer available.' })
         setApiError('Please review your specialization choices and try again.')
@@ -170,6 +206,8 @@ export function RegisterPage() {
         )
         setErrors(fieldErrors)
         setApiError('Please review the highlighted fields.')
+        if (role === 'doctor' && doctorStepOneFields.some(field => fieldErrors[field])) setDoctorStep(1)
+        focusFirstInvalid(fieldErrors)
       } else {
         setApiError('We could not create your account right now. Please try again.')
       }
@@ -198,6 +236,11 @@ export function RegisterPage() {
     </FormField>
   )
 
+  const loginUrl = `/login${returnTo !== '/' ? `?${new URLSearchParams({ returnTo }).toString()}` : ''}`
+  const doctorParams = new URLSearchParams({ role: 'doctor' })
+  if (returnTo !== '/') doctorParams.set('returnTo', returnTo)
+  const doctorRegisterUrl = `/register?${doctorParams.toString()}`
+
   return (
     <AuthPageFrame
       aside={(
@@ -209,92 +252,87 @@ export function RegisterPage() {
       description="Choose the account type that matches how you will use MedReach. There is no public administrator registration."
       eyebrow="Join MedReach"
       title="Create your account"
+      variant={role === 'patient' ? 'editorial' : 'professional'}
     >
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_20px_55px_-42px_rgba(15,23,42,0.55)] sm:p-8" aria-labelledby="register-form-heading">
-        <div className="grid grid-cols-2 rounded-xl bg-slate-100 p-1" role="group" aria-label="Account type">
-          {['patient', 'doctor'].map(item => (
-            <button
-              aria-pressed={role === item}
-              className={`min-h-11 rounded-lg px-4 text-sm font-semibold capitalize focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 ${role === item ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-              key={item}
-              onClick={() => switchRole(item)}
-              type="button"
-            >
-              {item}
-            </button>
-          ))}
+      <section className={role === 'patient' ? 'auth-workspace' : 'doctor-onboarding'} aria-labelledby="register-form-heading">
+
+        <div className={role === 'patient' ? 'auth-workspace__intro' : 'mt-6'}>
+          <p className={role === 'doctor' ? 'doctor-form-eyebrow' : undefined}>{role === 'doctor' ? 'Professional onboarding' : 'Join MedReach'}</p>
+          {role === 'patient' ? (
+            <>
+              <h1 id="register-form-heading">Create your account</h1>
+              <span>Create a patient account to book consultations and continue your care.</span>
+            </>
+          ) : (
+            <>
+              <h2 className="doctor-form-title" id="register-form-heading" tabIndex="-1">
+                {doctorStep === 1 ? 'Account & credentials' : 'Professional profile'}
+              </h2>
+              <p className="doctor-form-support">Complete your secure application for MedReach review.</p>
+            </>
+          )}
         </div>
 
-        <div className="mt-6">
-          <p className="text-sm font-semibold text-blue-700">{role === 'doctor' ? 'Professional account' : 'Patient account'}</p>
-          <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950" id="register-form-heading">
-            {role === 'doctor' ? 'Register as a doctor' : 'Register as a patient'}
-          </h2>
-        </div>
+        {role === 'doctor' && (
+          <nav className="doctor-stepper" aria-label="Doctor registration progress">
+            <div aria-current={doctorStep === 1 ? 'step' : undefined} data-state={doctorStep === 1 ? 'current' : 'complete'}>
+              <span>01</span>
+              <strong>Account &amp; credentials</strong>
+            </div>
+            <i aria-hidden="true" />
+            <div aria-current={doctorStep === 2 ? 'step' : undefined} data-state={doctorStep === 2 ? 'current' : 'upcoming'}>
+              <span>02</span>
+              <strong>Professional profile</strong>
+            </div>
+          </nav>
+        )}
 
         {apiError && <div className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{apiError}</div>}
-        <ErrorSummary errors={errors} />
+        {role === 'doctor' && <ErrorSummary errors={Object.fromEntries(Object.entries(errors).filter(([field]) => doctorStep === 1 ? doctorStepOneFields.includes(field) : !doctorStepOneFields.includes(field)))} />}
 
         <form className="mt-6 space-y-5" noValidate onSubmit={handleSubmit}>
-          <div className="grid gap-5 sm:grid-cols-2">
-            {field('fullName', 'Full name', { autoComplete: 'name', placeholder: role === 'doctor' ? 'Dr. Priya Sharma' : 'Priya Sharma' })}
-            {field('email', 'Email', { autoComplete: 'email', placeholder: 'you@example.com', type: 'email' })}
-          </div>
-          <div className="grid gap-5 sm:grid-cols-2">
-            <PasswordField
-              autoComplete="new-password"
-              disabled={submitting}
-              error={errors.password}
-              hint="Use 12 to 128 characters."
-              id="register-password"
-              label="Password"
-              onChange={event => update('password', event.target.value)}
-              onToggle={() => setPasswordVisible(value => !value)}
-              value={values.password}
-              visible={passwordVisible}
-            />
-            <PasswordField
-              autoComplete="new-password"
-              disabled={submitting}
-              error={errors.confirmPassword}
-              id="register-confirmPassword"
-              label="Confirm password"
-              onChange={event => update('confirmPassword', event.target.value)}
-              onToggle={() => setConfirmPasswordVisible(value => !value)}
-              value={values.confirmPassword}
-              visible={confirmPasswordVisible}
-            />
-          </div>
-
-          {role === 'doctor' && (
-            <>
-              <div className="grid gap-5 sm:grid-cols-2">
-                {field('qualification', 'Qualification', { placeholder: 'MBBS, MD' })}
-                {field('experienceYears', 'Experience in years', { min: 0, max: 80, placeholder: '8', type: 'number' })}
+          {(role === 'patient' || doctorStep === 1) && (
+            <div className={role === 'doctor' ? 'doctor-step-panel' : 'grid gap-5'} key="account-step">
+              <div className={role === 'patient' ? 'grid gap-5' : 'grid gap-5 sm:grid-cols-2'}>
+                {field('fullName', 'Full name', { autoComplete: 'name', placeholder: role === 'doctor' ? 'Dr. Priya Sharma' : 'Priya Sharma' })}
+                {field('email', 'Email', { autoComplete: 'email', placeholder: 'you@example.com', type: 'email' })}
               </div>
-
-              <fieldset>
-                <legend className="text-sm font-semibold text-slate-800">Specializations</legend>
-                <p className="mt-1 text-xs leading-5 text-slate-500">Choose every area that applies. At least one is required.</p>
-                {specializationError && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert">{specializationError}</p>}
-                {!specializationError && specializations.length === 0 && <div className="mt-3 h-20 animate-pulse rounded-lg bg-slate-100" aria-label="Loading specializations" />}
-                <div className="mt-3 grid gap-2 sm:grid-cols-2" id="register-specializationIds">
-                  {specializations.map(item => (
-                    <label className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border px-3 text-sm font-medium ${doctor.specializationIds.includes(item.id) ? 'border-blue-600 bg-blue-50 text-blue-900' : 'border-slate-200 text-slate-700 hover:border-blue-300'}`} key={item.id}>
-                      <input
-                        checked={doctor.specializationIds.includes(item.id)}
-                        className="size-4 accent-blue-700"
-                        disabled={submitting}
-                        onChange={() => toggleSpecialization(item.id)}
-                        type="checkbox"
-                      />
-                      {item.name}
-                    </label>
-                  ))}
+              <div className={role === 'patient' ? 'grid gap-5' : 'grid gap-5 sm:grid-cols-2'}>
+                <PasswordField
+                  autoComplete="new-password"
+                  disabled={submitting}
+                  error={errors.password}
+                  hint="Use 12 to 128 characters."
+                  id="register-password"
+                  label="Password"
+                  onChange={event => update('password', event.target.value)}
+                  onToggle={() => setPasswordVisible(value => !value)}
+                  value={values.password}
+                  visible={passwordVisible}
+                />
+                <PasswordField
+                  autoComplete="new-password"
+                  disabled={submitting}
+                  error={errors.confirmPassword}
+                  id="register-confirmPassword"
+                  label="Confirm password"
+                  onChange={event => update('confirmPassword', event.target.value)}
+                  onToggle={() => setConfirmPasswordVisible(value => !value)}
+                  value={values.confirmPassword}
+                  visible={confirmPasswordVisible}
+                />
+              </div>
+              {role === 'doctor' && (
+                <div className="grid gap-5 sm:grid-cols-2">
+                  {field('qualification', 'Qualification', { placeholder: 'MBBS, MD' })}
+                  {field('experienceYears', 'Experience in years', { min: 0, max: 80, placeholder: '8', type: 'number' })}
                 </div>
-                {errors.specializationIds && <p className="mt-2 text-sm text-red-700" id="register-specializationIds-error">{errors.specializationIds}</p>}
-              </fieldset>
+              )}
+            </div>
+          )}
 
+          {role === 'doctor' && doctorStep === 2 && (
+            <div className="doctor-step-panel" key="profile-step">
               <FormField error={errors.bio} id="register-bio" label="Bio (optional)">
                 <textarea
                   className={`${inputClassName} min-h-28 py-3`}
@@ -313,21 +351,67 @@ export function RegisterPage() {
                 {field('clinicCity', 'City (optional)', { required: false })}
                 {field('clinicDistrict', 'District (optional)', { required: false })}
               </div>
-            </>
+
+              <div className="doctor-profile-divider">
+                <p>Specializations</p>
+                <small>Select every area that applies</small>
+              </div>
+              <fieldset className="doctor-specializations">
+                <legend className="sr-only">Specializations</legend>
+                <p>Choose at least one specialization. Multiple selections are supported.</p>
+                {specializationError && <p className="doctor-specializations__error" role="alert">{specializationError}</p>}
+                {!specializationError && specializations.length === 0 && <div className="h-20 animate-pulse rounded-md bg-[#EEE9DF]" aria-label="Loading specializations" />}
+                <div className="doctor-specialization-grid" id="register-specializationIds">
+                  {specializations.map(item => {
+                    const selected = doctor.specializationIds.includes(item.id)
+                    return (
+                      <label className="doctor-specialization" data-selected={selected} key={item.id}>
+                        <input
+                          checked={selected}
+                          disabled={submitting}
+                          onChange={() => toggleSpecialization(item.id)}
+                          type="checkbox"
+                        />
+                        <span aria-hidden="true">{selected ? '✓' : '+'}</span>
+                        {item.name}
+                      </label>
+                    )
+                  })}
+                </div>
+                {errors.specializationIds && <p className="mt-2 text-sm text-red-700" id="register-specializationIds-error">{errors.specializationIds}</p>}
+              </fieldset>
+
+              <div className="doctor-verification-note">
+                <p>MedReach review</p>
+                <span>Your doctor account will be created with a Pending profile. You can sign in while MedReach reviews your submitted professional details.</span>
+              </div>
+            </div>
           )}
 
-          <button
-            className="inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-blue-700 px-5 text-sm font-semibold text-white hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 disabled:cursor-wait disabled:bg-blue-400"
-            disabled={submitting || (role === 'doctor' && specializations.length === 0)}
-            type="submit"
-          >
-            {submitting ? 'Creating account…' : `Create ${role} account`}
-          </button>
+          {role === 'doctor' && doctorStep === 2 ? (
+            <div className="doctor-form-actions">
+              <button className="doctor-back" disabled={submitting} onClick={() => setDoctorStep(1)} type="button">← Back</button>
+              <button className="doctor-submit" disabled={submitting} type="submit">
+                {submitting ? 'Creating account…' : 'Submit for review →'}
+              </button>
+            </div>
+          ) : (
+            <button className={role === 'patient' ? 'auth-submit' : 'doctor-submit'} disabled={submitting} type="submit">
+              {submitting ? 'Creating account…' : role === 'patient' ? 'Create account →' : 'Continue →'}
+            </button>
+          )}
         </form>
 
-        <p className="mt-6 border-t border-slate-200 pt-5 text-center text-sm text-slate-600">
-          Already registered? <Link className="font-semibold text-blue-700 hover:text-blue-800" to={`/login${returnTo !== '/' ? `?${new URLSearchParams({ returnTo }).toString()}` : ''}`}>Sign in</Link>
+        <p className={role === 'patient' ? 'auth-switch' : 'doctor-login-route'}>
+          {role === 'patient' ? 'Already have an account? ' : 'Already submitted? '}
+          <Link to={loginUrl}>Sign in →</Link>
         </p>
+        {role === 'patient' && (
+          <p className="auth-doctor-route">Are you a doctor? <Link to={doctorRegisterUrl}>Join MedReach →</Link></p>
+        )}
+        {role === 'doctor' && (
+          <p className="doctor-patient-route">Looking for a patient account? <Link to="/register">Create a patient account →</Link></p>
+        )}
       </section>
     </AuthPageFrame>
   )
