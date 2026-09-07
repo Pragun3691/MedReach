@@ -72,5 +72,11 @@ export function createAppointmentController(service) {
       const appointment = await service.finishConsultation(appointmentId, request.authUser)
       response.status(200).json({ appointment })
     },
+
+    async createVideoSession(request, response) {
+      const appointmentId = appointmentIdSchema.parse(request.params.appointmentId)
+      const videoSession = await service.createVideoSession(appointmentId, request.authUser)
+      response.status(200).json(videoSession)
+    },
   }
 }

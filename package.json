@@ -8,6 +8,6 @@
     "build": "npm --prefix client run build",
     "lint": "npm --prefix client run lint && npm --prefix server run lint",
     "seed": "npm --prefix server run seed:public-discovery",
-    "test": "npm --prefix server run test"
+    "test": "npm --prefix server run test && npm --prefix client run test"
   }
 }

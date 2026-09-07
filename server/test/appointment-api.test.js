@@ -1,6 +1,7 @@
 import request from 'supertest'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
+import { JaasConfigurationError } from '../src/services/jaas-token.service.js'
 import { createBookingTestContext } from './support/booking-test-context.js'
 
 async function login(app, email) {
@@ -632,5 +633,152 @@ describe('consultation lifecycle API', () => {
     atMinutesFromStart(-5)
     expect((await patient.post('/api/appointments/999999/ready').send({})).status).toBe(404)
     expect((await doctor.post('/api/appointments/999999/open-room').send({})).status).toBe(404)
+  })
+})
+
+describe('appointment video-token API', () => {
+  let context
+  let app
+  let patient
+  let otherPatient
+  let doctor
+  let otherDoctor
+  let admin
+  let appointmentId
+  let startAt
+  let endAt
+  let currentTime
+
+  beforeEach(async () => {
+    currentTime = new Date('2030-01-01T00:00:00.000Z')
+    context = createBookingTestContext({ clock: () => currentTime })
+    const slot = context.slots.find(item => item.id === 101)
+    slot.startAt = new Date(currentTime.getTime() + 60 * 60 * 1000).toISOString()
+    slot.endAt = new Date(currentTime.getTime() + 90 * 60 * 1000).toISOString()
+    app = createApp(context.services)
+    patient = await login(app, 'patient@example.test')
+    otherPatient = await login(app, 'other-patient@example.test')
+    doctor = await login(app, 'doctor@example.test')
+    otherDoctor = await login(app, 'other-doctor@example.test')
+    admin = await login(app, 'admin@example.test')
+    const booking = await patient.post('/api/appointments').send({ slotId: 101 })
+    appointmentId = booking.body.appointment.id
+    startAt = new Date(slot.startAt)
+    endAt = new Date(slot.endAt)
+  })
+
+  function atMinutesFromStart(minutes) {
+    currentTime = new Date(startAt.getTime() + minutes * 60 * 1000)
+  }
+
+  async function openRoom() {
+    atMinutesFromStart(-5)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/open-room`)).status).toBe(200)
+  }
+
+  it('issues matching appointment-scoped sessions to the assigned Doctor and owning Patient without requiring Ready', async () => {
+    await openRoom()
+    const stateBefore = JSON.stringify({ appointments: context.appointments, consultations: context.consultations })
+    const doctorSession = await doctor
+      .post(`/api/appointments/${appointmentId}/video-token`)
+      .send({ roomName: 'client-selected-room', moderator: false })
+    const patientSession = await patient
+      .post(`/api/appointments/${appointmentId}/video-token`)
+      .send({ roomName: 'another-room', moderator: true })
+
+    expect(doctorSession.status).toBe(200)
+    expect(patientSession.status).toBe(200)
+    expect(doctorSession.body).toMatchObject({
+      domain: '8x8.vc',
+      roomName: `test-app/medreach-appointment-${appointmentId}`,
+      role: 'doctor',
+    })
+    expect(patientSession.body).toMatchObject({
+      roomName: doctorSession.body.roomName,
+      role: 'patient',
+    })
+    expect(context.appointments[0].readyAt).toBeNull()
+    expect(JSON.stringify({ appointments: context.appointments, consultations: context.consultations })).toBe(stateBefore)
+  })
+
+  it('requires an opened room before issuing an unstarted Doctor or Patient session', async () => {
+    atMinutesFromStart(-5)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/video-token`)).status).toBe(409)
+    expect((await patient.post(`/api/appointments/${appointmentId}/video-token`)).status).toBe(409)
+  })
+
+  it('rejects anonymous, Admin, wrong-Patient, and wrong-Doctor requests', async () => {
+    await openRoom()
+    expect((await request(app).post(`/api/appointments/${appointmentId}/video-token`)).status).toBe(401)
+    expect((await admin.post(`/api/appointments/${appointmentId}/video-token`)).status).toBe(403)
+    expect((await otherPatient.post(`/api/appointments/${appointmentId}/video-token`)).status).toBe(403)
+    expect((await otherDoctor.post(`/api/appointments/${appointmentId}/video-token`)).status).toBe(403)
+  })
+
+  it.each(['cancelled', 'rescheduled', 'no_show', 'completed'])('locks out both clinical roles when the appointment is %s', async status => {
+    context.appointments[0].roomOpenedAt = startAt.toISOString()
+    context.appointments[0].status = status
+    atMinutesFromStart(0)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/video-token`)).status).toBe(409)
+    expect((await patient.post(`/api/appointments/${appointmentId}/video-token`)).status).toBe(409)
+  })
+
+  it('rejects both roles after an unstarted slot ends', async () => {
+    context.appointments[0].roomOpenedAt = new Date(startAt.getTime() - 5 * 60 * 1000).toISOString()
+    currentTime = endAt
+    expect((await doctor.post(`/api/appointments/${appointmentId}/video-token`)).status).toBe(409)
+    expect((await patient.post(`/api/appointments/${appointmentId}/video-token`)).status).toBe(409)
+  })
+
+  it('allows both roles to reconnect after slot end while the Consultation is active', async () => {
+    await openRoom()
+    expect((await doctor.post(`/api/appointments/${appointmentId}/begin-consultation`)).status).toBe(200)
+    currentTime = new Date(endAt.getTime() + 60 * 60 * 1000)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/video-token`)).status).toBe(200)
+    expect((await patient.post(`/api/appointments/${appointmentId}/video-token`)).status).toBe(200)
+  })
+
+  it('rejects both roles after the Consultation is finished', async () => {
+    await openRoom()
+    await doctor.post(`/api/appointments/${appointmentId}/begin-consultation`)
+    currentTime = new Date(endAt.getTime() + 60 * 60 * 1000)
+    await doctor.post(`/api/appointments/${appointmentId}/consultation/finish`)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/video-token`)).status).toBe(409)
+    expect((await patient.post(`/api/appointments/${appointmentId}/video-token`)).status).toBe(409)
+  })
+
+  it('returns distinct rooms for different appointments and stable rooms for reconnects', async () => {
+    const secondSlot = context.slots.find(item => item.id === 102)
+    secondSlot.startAt = startAt.toISOString()
+    secondSlot.endAt = endAt.toISOString()
+    const secondBooking = await patient.post('/api/appointments').send({ slotId: 102 })
+    await openRoom()
+    expect((await doctor.post(`/api/appointments/${secondBooking.body.appointment.id}/open-room`)).status).toBe(200)
+    const first = await patient.post(`/api/appointments/${appointmentId}/video-token`)
+    const repeated = await patient.post(`/api/appointments/${appointmentId}/video-token`)
+    const different = await patient.post(`/api/appointments/${secondBooking.body.appointment.id}/video-token`)
+    expect(first.body.roomName).toBe(repeated.body.roomName)
+    expect(first.body.roomName).not.toBe(different.body.roomName)
+  })
+
+  it('fails safely when server-only JaaS configuration is unavailable', async () => {
+    context = createBookingTestContext({
+      clock: () => currentTime,
+      tokenService: { async createVideoSession() { throw new JaasConfigurationError() } },
+    })
+    const slot = context.slots.find(item => item.id === 101)
+    slot.startAt = startAt.toISOString()
+    slot.endAt = endAt.toISOString()
+    app = createApp(context.services)
+    patient = await login(app, 'patient@example.test')
+    doctor = await login(app, 'doctor@example.test')
+    appointmentId = (await patient.post('/api/appointments').send({ slotId: 101 })).body.appointment.id
+    await openRoom()
+    const response = await patient.post(`/api/appointments/${appointmentId}/video-token`)
+    expect(response.status).toBe(503)
+    expect(response.body.error).toEqual({
+      code: 'VIDEO_CONFIGURATION_UNAVAILABLE',
+      message: 'Video service is temporarily unavailable',
+    })
   })
 })

@@ -16,6 +16,7 @@ export function createAppointmentRouter(service, authenticate) {
   router.post('/:appointmentId/begin-consultation', authenticate, authorizeRoles('doctor'), controller.beginConsultation)
   router.post('/:appointmentId/no-show', authenticate, authorizeRoles('doctor'), controller.markNoShow)
   router.post('/:appointmentId/consultation/finish', authenticate, authorizeRoles('doctor'), controller.finishConsultation)
+  router.post('/:appointmentId/video-token', authenticate, authorizeRoles('patient', 'doctor'), controller.createVideoSession)
 
   return router
 }

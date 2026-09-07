@@ -4,6 +4,7 @@ import {
 } from '../data-access/appointment.repository.js'
 import { AppError } from '../errors/app-error.js'
 import { consultationTimes, isConsultationEditable, isWithin } from './consultation-lifecycle.js'
+import { JaasConfigurationError, jaasTokenService } from './jaas-token.service.js'
 
 function optionalNumber(value) {
   return value === null || value === undefined ? null : Number(value)
@@ -101,6 +102,7 @@ function translateDataError(error) {
     CONSULTATION_NOT_BEGINNABLE: [409, 'CONSULTATION_NOT_BEGINNABLE', 'The consultation cannot be started at this time'],
     APPOINTMENT_NOT_NO_SHOWABLE: [409, 'APPOINTMENT_NOT_NO_SHOWABLE', 'This appointment cannot be marked as a no-show'],
     CONSULTATION_NOT_FINISHABLE: [409, 'CONSULTATION_NOT_FINISHABLE', 'The consultation cannot be finished'],
+    VIDEO_SESSION_UNAVAILABLE: [409, 'VIDEO_SESSION_UNAVAILABLE', 'Video access is not available for this appointment'],
     SAME_SLOT: [400, 'SAME_SLOT', 'Choose a different slot to reschedule'],
   }
   const [status, code, message] = errors[error.code] ?? []
@@ -108,7 +110,7 @@ function translateDataError(error) {
   throw new AppError(status, code, message)
 }
 
-export function createAppointmentService(repository = appointmentRepository, clock = () => new Date()) {
+export function createAppointmentService(repository = appointmentRepository, clock = () => new Date(), tokenService = jaasTokenService) {
   return {
     async book(patient, slotId) {
       try {
@@ -210,6 +212,29 @@ export function createAppointmentService(repository = appointmentRepository, clo
       try {
         return mapAppointment(await repository.finishConsultation({ appointmentId, doctorId: doctor.id, now: clock() }), doctor, clock())
       } catch (error) {
+        translateDataError(error)
+      }
+    },
+
+    async createVideoSession(appointmentId, user) {
+      try {
+        const authorization = await repository.authorizeVideoSession({
+          appointmentId,
+          userId: user.id,
+          userRole: user.role,
+          now: clock(),
+        })
+        return await tokenService.createVideoSession({
+          appointmentId: authorization.appointmentId,
+          user,
+        })
+      } catch (error) {
+        if (error instanceof JaasConfigurationError) {
+          if (process.env.NODE_ENV !== 'test') {
+            console.error('JaaS video authorization is unavailable because server configuration is invalid')
+          }
+          throw new AppError(503, 'VIDEO_CONFIGURATION_UNAVAILABLE', 'Video service is temporarily unavailable')
+        }
         translateDataError(error)
       }
     },

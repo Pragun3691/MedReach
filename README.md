@@ -79,6 +79,7 @@ Doctor profiles remain private until their verification is approved.
 - `POST /api/appointments/:appointmentId/begin-consultation` — assigned Doctor begins the clinical encounter after opening the room
 - `POST /api/appointments/:appointmentId/no-show` — assigned Doctor manually records no-show from T+15 onward
 - `POST /api/appointments/:appointmentId/consultation/finish` — assigned Doctor finishes an active consultation
+- `POST /api/appointments/:appointmentId/video-token` — owning Patient or assigned Doctor obtains short-lived JaaS join authorization
 - `GET /api/doctors/me/appointments` — Doctor lists assigned appointments
 
 Booking and rescheduling are transactional. PostgreSQL row locks and a partial
@@ -107,11 +108,36 @@ finishes it, atomically moving the appointment to `completed`.
 No-show is a manual assigned-Doctor action available from 15 minutes after the
 scheduled start with no upper time limit. It is never automatic. Patient
 self-cancellation and rescheduling close at that same T+15 boundary and are
-blocked once a Consultation begins. This checkpoint does not include JaaS,
-Jitsi, video, or consultation user interfaces.
+blocked once a Consultation begins.
+
+## JaaS integration foundation
+
+MedReach uses the JaaS deployment at `8x8.vc` through its IFrame API. The
+Express backend authorizes the owning Patient or assigned Doctor against the
+current locked appointment and Consultation state, then signs a short-lived
+RS256 JWT. Doctors receive moderator permission and Patients receive ordinary
+participant permission. Tokens use a literal, stable room named
+`medreach-appointment-<appointmentId>` and the IFrame receives the full
+`<AppID>/<room>` name. The browser never chooses the room and never receives
+the private signing key.
+
+Configure real development credentials only in `server/.env` using
+`JAAS_APP_ID`, `JAAS_API_KEY_ID`, `JAAS_PRIVATE_KEY_BASE64`, and optionally
+`JAAS_TOKEN_TTL_SECONDS` (default 600 seconds). The Base64-encoded PEM RSA
+private key may use PKCS#8 (`BEGIN PRIVATE KEY`) or legacy PKCS#1
+(`BEGIN RSA PRIVATE KEY`) format. It is decoded and parsed only by the server
+when video authorization is first requested.
+
+The reusable `JaasMeeting` component loads
+`https://8x8.vc/<AppID>/external_api.js` once, limits the built-in toolbar to
+microphone, camera, and hangup, exposes participant and local media events, and
+disposes the IFrame API on unmount. Active Consultations can request fresh
+tokens after slot end for reconnects. Leaving or hanging up never finishes a
+MedReach Consultation. This foundation does not yet add a user-visible video
+consultation page or clinical workflow UI.
 
 ## Known exclusions
 
-This milestone does not implement payments, video consultations, clinical
-notes, prescriptions, medical history, follow-ups, consultation user
-interfaces, administration tools, or email/SMS notifications.
+This milestone does not implement payments, the complete video consultation
+UX, clinical notes, prescriptions, medical history, follow-ups, consultation
+workflow interfaces, administration tools, or email/SMS notifications.

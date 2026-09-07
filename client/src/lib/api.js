@@ -101,6 +101,13 @@ export function rescheduleAppointment(appointmentId, slotId) {
   })
 }
 
+export function getAppointmentVideoSession(appointmentId, signal) {
+  return requestJson(`/api/appointments/${appointmentId}/video-token`, {
+    method: 'POST',
+    signal,
+  })
+}
+
 export function listNotifications({ limit = 20, offset = 0, signal } = {}) {
   const query = new URLSearchParams({ limit: String(limit), offset: String(offset) })
   return requestJson(`/api/notifications?${query.toString()}`, { signal })

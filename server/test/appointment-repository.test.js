@@ -236,4 +236,51 @@ describe('appointment repository transactions', () => {
     expect(statements).toContain('ROLLBACK')
     expect(statements).not.toContain('COMMIT')
   })
+
+  it('authorizes active-Consultation reconnect after slot end under row locks', async () => {
+    const statements = []
+    const activeConsultation = { id: 44, appointment_id: 1000, started_at: '2030-01-01T08:55:00.000Z', finished_at: null }
+    const { database } = databaseWith(vi.fn(async sql => {
+      statements.push(sql)
+      if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] }
+      if (sql.includes('FOR UPDATE OF a')) return { rows: [appointmentRow] }
+      if (sql.includes('FROM consultations')) return { rows: [activeConsultation] }
+      throw new Error(`Unexpected SQL: ${sql}`)
+    }))
+    const repository = createAppointmentRepository(() => database)
+
+    const result = await repository.authorizeVideoSession({
+      appointmentId: 1000,
+      userId: 1,
+      userRole: 'patient',
+      now: new Date('2030-01-01T10:00:00.000Z'),
+    })
+
+    expect(result).toEqual({ appointmentId: 1000 })
+    expect(statements.findIndex(sql => sql.includes('FOR UPDATE OF a')))
+      .toBeLessThan(statements.findIndex(sql => sql.includes('FROM consultations')))
+    expect(statements.at(-1)).toBe('COMMIT')
+  })
+
+  it('rejects an unstarted video session at slot end without writing lifecycle state', async () => {
+    const statements = []
+    const openedAppointment = { ...appointmentRow, room_opened_at: '2030-01-01T08:55:00.000Z' }
+    const { database } = databaseWith(vi.fn(async sql => {
+      statements.push(sql)
+      if (sql === 'BEGIN' || sql === 'ROLLBACK') return { rows: [] }
+      if (sql.includes('FOR UPDATE OF a')) return { rows: [openedAppointment] }
+      if (sql.includes('FROM consultations')) return { rows: [] }
+      throw new Error(`Unexpected SQL: ${sql}`)
+    }))
+    const repository = createAppointmentRepository(() => database)
+
+    await expect(repository.authorizeVideoSession({
+      appointmentId: 1000,
+      userId: 10,
+      userRole: 'doctor',
+      now: new Date(validSlot.end_at),
+    })).rejects.toMatchObject({ code: 'VIDEO_SESSION_UNAVAILABLE' })
+    expect(statements.every(sql => !sql.startsWith('UPDATE') && !sql.startsWith('INSERT'))).toBe(true)
+    expect(statements).toContain('ROLLBACK')
+  })
 })

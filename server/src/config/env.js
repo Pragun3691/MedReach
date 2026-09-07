@@ -6,6 +6,10 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1).optional(),
   DATABASE_SSL: z.enum(['true', 'false']).default('false'),
   SESSION_SECRET: z.string().min(32).optional(),
+  JAAS_APP_ID: z.string().optional(),
+  JAAS_API_KEY_ID: z.string().optional(),
+  JAAS_PRIVATE_KEY_BASE64: z.string().optional(),
+  JAAS_TOKEN_TTL_SECONDS: z.string().optional(),
 })
 
 const result = envSchema.safeParse(process.env)

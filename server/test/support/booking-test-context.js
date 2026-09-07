@@ -14,7 +14,20 @@ function indiaDate(value) {
   }).format(new Date(value))
 }
 
-export function createBookingTestContext({ clock = () => new Date() } = {}) {
+export function createBookingTestContext({
+  clock = () => new Date(),
+  tokenService = {
+    async createVideoSession({ appointmentId, user }) {
+      return {
+        domain: '8x8.vc',
+        roomName: `test-app/medreach-appointment-${appointmentId}`,
+        jwt: `test-jwt-${appointmentId}-${user.role}`,
+        expiresAt: new Date(new Date(clock()).getTime() + 10 * 60 * 1000).toISOString(),
+        role: user.role,
+      }
+    },
+  },
+} = {}) {
   const users = [
     { id: 1, fullName: 'Ananya Rao', email: 'patient@example.test', role: 'patient', isEnabled: true },
     { id: 2, fullName: 'Rohan Das', email: 'other-patient@example.test', role: 'patient', isEnabled: true },
@@ -281,6 +294,27 @@ export function createBookingTestContext({ clock = () => new Date() } = {}) {
       appointment.updatedAt = consultation.finishedAt
       return rowFor(appointment)
     },
+
+    async authorizeVideoSession({ appointmentId, userId, userRole, now }) {
+      const appointment = appointments.find(item => item.id === Number(appointmentId))
+      if (!appointment) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
+      const slot = slotById(appointment.slotId)
+      const owns = userRole === 'patient' && appointment.patientId === userId
+      const assigned = userRole === 'doctor' && slot.doctorId === userId
+      if (!owns && !assigned) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      const consultation = consultations.find(item => item.appointmentId === appointment.id)
+      if (appointment.status !== 'booked' || consultation?.finishedAt) {
+        throw new AppointmentDataError('VIDEO_SESSION_UNAVAILABLE')
+      }
+      if (consultation) return { appointmentId: appointment.id }
+
+      const doctorWindowOpensAt = new Date(new Date(slot.startAt).getTime() - 5 * 60 * 1000)
+      const withinUnstartedWindow = Boolean(appointment.roomOpenedAt)
+        && new Date(now) < new Date(slot.endAt)
+        && (userRole === 'patient' || new Date(now) >= doctorWindowOpensAt)
+      if (!withinUnstartedWindow) throw new AppointmentDataError('VIDEO_SESSION_UNAVAILABLE')
+      return { appointmentId: appointment.id }
+    },
   }
 
   const notificationRepository = {
@@ -361,7 +395,7 @@ export function createBookingTestContext({ clock = () => new Date() } = {}) {
     repository,
     services: {
       auth,
-      appointments: createAppointmentService(repository, clock),
+      appointments: createAppointmentService(repository, clock, tokenService),
       notifications: createNotificationService(notificationRepository),
       doctors: publicDoctors,
     },

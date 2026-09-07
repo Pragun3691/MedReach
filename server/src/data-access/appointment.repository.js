@@ -495,6 +495,33 @@ export function createAppointmentRepository(databaseProvider = getPool) {
       return findAppointment(client, appointmentId)
     })
   },
+
+  async authorizeVideoSession({ appointmentId, userId, userRole, now }) {
+    return withTransaction(databaseProvider, async client => {
+      const appointment = await lockAppointment(client, appointmentId)
+      if (!appointment) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
+
+      const ownsAppointment = userRole === 'patient' && Number(appointment.patient_id) === userId
+      const isAssignedDoctor = userRole === 'doctor' && Number(appointment.doctor_id) === userId
+      if (!ownsAppointment && !isAssignedDoctor) {
+        throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      }
+
+      const consultation = await lockConsultation(client, appointmentId)
+      if (appointment.status !== 'booked' || consultation?.finished_at) {
+        throw new AppointmentDataError('VIDEO_SESSION_UNAVAILABLE')
+      }
+      if (consultation) return { appointmentId: Number(appointment.id) }
+
+      const doctorWindowOpensAt = new Date(new Date(appointment.start_at).getTime() - 5 * 60 * 1000)
+      const withinUnstartedWindow = Boolean(appointment.room_opened_at)
+        && before(now, appointment.end_at)
+        && (userRole === 'patient' || atOrAfter(now, doctorWindowOpensAt))
+      if (!withinUnstartedWindow) throw new AppointmentDataError('VIDEO_SESSION_UNAVAILABLE')
+
+      return { appointmentId: Number(appointment.id) }
+    })
+  },
   }
 }
 
