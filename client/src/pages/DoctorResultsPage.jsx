@@ -20,26 +20,23 @@ function currentSearch(searchParams) {
   return { type: 'problem', value: '' }
 }
 
-function pageHeading(searchParams) {
-  if (searchParams.get('problem')) return `Doctors for “${searchParams.get('problem')}”`
-  if (searchParams.get('specialization')) return `${searchParams.get('specialization')} doctors`
-  if (searchParams.get('name')) return `Results for “${searchParams.get('name')}”`
-  return 'Find a doctor'
-}
-
 function ResultsSkeleton() {
   return (
-    <div className="space-y-4" aria-label="Loading doctors">
+    <div className="doctor-results-list" aria-label="Loading doctors">
       {[1, 2, 3].map(item => (
-        <div className="animate-pulse rounded-2xl border border-slate-200 bg-white p-6" key={item}>
-          <div className="flex gap-4">
-            <div className="size-16 shrink-0 rounded-full bg-slate-200" />
-            <div className="flex-1 space-y-3 pt-1">
-              <div className="h-5 w-48 rounded bg-slate-200" />
-              <div className="h-4 w-36 rounded bg-blue-100" />
-              <div className="h-3 w-3/4 rounded bg-slate-100" />
-              <div className="h-3 w-full rounded bg-slate-100" />
-            </div>
+        <div className="doctor-result doctor-result--skeleton animate-pulse" key={item}>
+          <div className="doctor-result__portrait bg-[#DCE8E2]" />
+          <div className="doctor-result__content space-y-3">
+            <div className="h-6 w-48 rounded-sm bg-[#D8DCD8]" />
+            <div className="h-4 w-36 rounded-sm bg-[#D5E7DE]" />
+            <div className="mt-5 h-4 w-4/5 rounded-sm bg-[#E3E1DB]" />
+            <div className="h-3 w-full rounded-sm bg-[#E9E6DF]" />
+            <div className="h-3 w-4/5 rounded-sm bg-[#E9E6DF]" />
+          </div>
+          <div className="doctor-result__decision space-y-3">
+            <div className="h-3 w-24 rounded-sm bg-[#DCE8E2]" />
+            <div className="h-4 w-32 rounded-sm bg-[#D8DCD8]" />
+            <div className="mt-auto h-11 w-full rounded-sm bg-[#D8DCD8]" />
           </div>
         </div>
       ))}
@@ -138,111 +135,89 @@ export function DoctorResultsPage() {
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950">
-      <PublicHeader />
+    <div className="min-h-screen overflow-x-hidden bg-[#F8F6F1] text-[#1D2A35]">
+      <PublicHeader editorial />
 
       <main>
-        <section className="border-b border-blue-100 bg-[#f4f8fd]">
-          <div className="mx-auto max-w-7xl px-5 py-10 sm:px-8 lg:px-10 lg:py-12">
-            <nav className="text-sm text-slate-500" aria-label="Breadcrumb">
-              <Link className="hover:text-blue-700" to="/">Home</Link>
-              <span className="mx-2" aria-hidden="true">/</span>
-              <span className="text-slate-700">Find doctors</span>
+        <section className="doctor-discovery-intro">
+          <div className="doctor-discovery-intro__inner mx-auto max-w-7xl px-5 py-9 sm:px-8 sm:py-12 lg:px-10 lg:py-14">
+            <nav className="doctor-discovery-breadcrumb text-sm" aria-label="Breadcrumb">
+              <Link className="rounded-sm transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A8E6CF] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B223B]" to="/">Home</Link>
+              <span className="mx-2.5" aria-hidden="true">/</span>
+              <span>Find doctors</span>
             </nav>
 
             <div className="mt-5 max-w-3xl">
-              <h1 className="text-3xl font-bold tracking-[-0.035em] text-slate-950 sm:text-4xl">{pageHeading(searchParams)}</h1>
-              <p className="mt-3 leading-7 text-slate-600">
-                Compare verified professional details, consultation fees and real upcoming availability.
+              <p className="editorial-eyebrow">Find care</p>
+              <h1 className="mt-4 text-[2.75rem] font-medium leading-[1.02] tracking-[-0.05em] text-[#F9F7F1] sm:text-[3.8rem]">Find a doctor</h1>
+              <p className="mt-4 max-w-2xl text-base leading-7 text-white/65 sm:text-lg">
+                Search verified doctors by specialization, professional details and real availability.
               </p>
             </div>
 
-            <div className="max-w-4xl">
-              <DiscoverySearch
-                className="mt-7"
-                initialQuery={searchIntent.value}
-                initialType={searchIntent.type}
-                key={`${searchIntent.type}:${searchIntent.value}`}
-              />
+            <div className="max-w-5xl sm:mt-1">
+              <DiscoverySearch className="mt-7" initialQuery={searchIntent.value} initialType={searchIntent.type} key={`${searchIntent.type}:${searchIntent.value}`} />
             </div>
           </div>
         </section>
 
-        <section className="border-b border-slate-200 bg-white">
-          <div className="mx-auto max-w-7xl px-5 py-5 sm:px-8 lg:px-10">
-            <DoctorFilters
-              filters={filters}
-              minDate={todayInIndia()}
-              onApply={applyFilters}
-              onChange={setFilter}
-              onClear={clearFilters}
-              specializations={specializationState.items}
-            />
-            {specializationState.error && <p className="mt-3 text-sm text-amber-700">Specialization options are temporarily unavailable.</p>}
+        <section className="doctor-filter-rail">
+          <div className="doctor-filter-rail__inner mx-auto max-w-7xl px-5 py-4 sm:px-8 lg:px-10">
+            <DoctorFilters filters={filters} minDate={todayInIndia()} onApply={applyFilters} onChange={setFilter} onClear={clearFilters} specializations={specializationState.items} />
+            {specializationState.error && <p className="mt-3 text-sm text-[#80612D]">Specialization options are temporarily unavailable.</p>}
           </div>
         </section>
 
-        <section className="mx-auto max-w-7xl px-5 py-10 sm:px-8 lg:px-10 lg:py-12" aria-live="polite">
-          <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <p className="font-semibold text-slate-900">
-              {loading ? 'Finding doctors…' : `${total} ${total === 1 ? 'doctor' : 'doctors'} found`}
-            </p>
-            {!loading && total > 0 && <p className="text-sm text-slate-500">Earliest availability first</p>}
+        <section className="doctor-results-section mx-auto max-w-7xl px-5 pb-16 pt-7 sm:px-8 sm:pb-20 lg:px-10 lg:pb-24 lg:pt-9" aria-live="polite">
+          <div className="results-heading-row">
+            <div>
+              <p className="results-count">
+                {loading ? 'Finding doctors…' : `${total} ${total === 1 ? 'doctor' : 'doctors'} found`}
+              </p>
+              {!loading && searchIntent.value && <p className="results-query">Results for <strong>“{searchIntent.value}”</strong></p>}
+            </div>
+            {!loading && total > 0 && (
+              <div className="sort-note">
+                <span>Sort:</span>
+                <strong>Earliest availability first</strong>
+              </div>
+            )}
           </div>
 
           {loading && <ResultsSkeleton />}
 
           {!loading && error && (
-            <div className="rounded-2xl border border-amber-200 bg-white px-6 py-12 text-center">
-              <h2 className="text-xl font-semibold text-slate-950">We couldn’t load doctors</h2>
-              <p className="mt-2 text-slate-600">{error}</p>
-              <button className="mt-6 min-h-11 rounded-lg bg-blue-700 px-5 text-sm font-semibold text-white hover:bg-blue-800" onClick={() => setRequestVersion(version => version + 1)} type="button">
-                Try again
-              </button>
+            <div className="results-state" role="alert">
+              <span className="results-state__mark" aria-hidden="true">!</span>
+              <h2>We couldn’t load doctors</h2>
+              <p>{error}</p>
+              <button onClick={() => setRequestVersion(version => version + 1)} type="button">Try again <span aria-hidden="true">→</span></button>
             </div>
           )}
 
           {!loading && !error && results.items.length === 0 && (
-            <div className="rounded-2xl border border-slate-200 bg-white px-6 py-14 text-center">
-              <div className="mx-auto grid size-12 place-items-center rounded-full bg-blue-50 text-blue-700" aria-hidden="true">
-                <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="11" cy="11" r="7" />
-                  <path d="m20 20-3.5-3.5" strokeLinecap="round" />
-                </svg>
-              </div>
-              <h2 className="mt-4 text-xl font-semibold text-slate-950">No doctors match these filters</h2>
-              <p className="mx-auto mt-2 max-w-md text-slate-600">Try another health concern, choose a different date, or clear the filters.</p>
-              <button className="mt-6 min-h-11 rounded-lg border border-blue-700 px-5 text-sm font-semibold text-blue-700 hover:bg-blue-50" onClick={clearFilters} type="button">
-                Clear filters
-              </button>
+            <div className="results-state">
+              <svg className="mx-auto size-8 text-[#2C7A68]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" strokeLinecap="round" />
+              </svg>
+              <h2>No doctors match these filters</h2>
+              <p>Try changing your search or filters.</p>
+              <button onClick={clearFilters} type="button">Clear filters <span aria-hidden="true">→</span></button>
             </div>
           )}
 
           {!loading && !error && results.items.length > 0 && (
-            <div className="space-y-4">
+            <div className="doctor-results-list">
               {results.items.map(doctor => <DoctorResultCard doctor={doctor} key={doctor.id} selectedDate={filters.date} />)}
             </div>
           )}
 
           {!loading && !error && pageCount > 1 && (
-            <nav className="mt-8 flex items-center justify-center gap-4" aria-label="Doctor results pagination">
-              <button
-                className="min-h-10 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={offset === 0}
-                onClick={() => changePage(Math.max(0, offset - pageSize))}
-                type="button"
-              >
-                Previous
-              </button>
-              <span className="text-sm text-slate-600">Page {pageNumber} of {pageCount}</span>
-              <button
-                className="min-h-10 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={offset + pageSize >= total}
-                onClick={() => changePage(offset + pageSize)}
-                type="button"
-              >
-                Next
-              </button>
+            <nav className="mt-9 flex items-center justify-center gap-4" aria-label="Doctor results pagination">
+              <button className="pagination-button" disabled={offset === 0} onClick={() => changePage(Math.max(0, offset - pageSize))} type="button">Previous</button>
+              <span className="text-sm text-[#61716B]">Page {pageNumber} of {pageCount}</span>
+              <button className="pagination-button" disabled={offset + pageSize >= total} onClick={() => changePage(offset + pageSize)} type="button">Next</button>
             </nav>
           )}
         </section>

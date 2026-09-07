@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { useModalDialog } from '../hooks/useModalDialog.js'
+import { DiscoveryDatePicker, DiscoverySelect } from './DiscoveryControls.jsx'
 
 const feeOptions = [
   { value: '', label: 'Any fee' },
@@ -18,15 +19,11 @@ const experienceOptions = [
 
 function FilterField({ label, children }) {
   return (
-    <label className="block">
-      <span className="mb-2 block text-sm font-semibold text-slate-800">{label}</span>
+    <div className="all-filters-field">
+      <span>{label}</span>
       {children}
-    </label>
+    </div>
   )
-}
-
-function filterSelectClass() {
-  return 'min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800 outline-none hover:border-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100'
 }
 
 export function DoctorFilters({ filters, specializations, minDate, onChange, onApply, onClear }) {
@@ -53,121 +50,65 @@ export function DoctorFilters({ filters, specializations, minDate, onChange, onA
   }
 
   const activeCount = Object.values(filters).filter(Boolean).length
+  const specializationOptions = [
+    { value: '', label: 'All specializations' },
+    ...specializations.map(item => ({ value: item.name, label: item.name })),
+  ]
 
   return (
     <>
-      <div className="flex flex-wrap items-end gap-3" aria-label="Doctor filters">
-        <label className="min-w-44 flex-1 sm:flex-none">
-          <span className="sr-only">Specialization</span>
-          <select className={filterSelectClass()} value={filters.specialization} onChange={event => onChange('specialization', event.target.value)}>
-            <option value="">All specializations</option>
-            {specializations.map(item => <option key={item.id} value={item.name}>{item.name}</option>)}
-          </select>
-        </label>
+      <div className="filter-strip" aria-label="Doctor filters">
+        <DiscoverySelect ariaLabel="Specialization filter" className="filter-control filter-control--specialization" onChange={value => onChange('specialization', value)} options={specializationOptions} placeholder="Specialization" value={filters.specialization} />
 
-        <label className="min-w-40 flex-1 sm:flex-none">
-          <span className="sr-only">Availability date</span>
-          <input
-            className={filterSelectClass()}
-            min={minDate}
-            type="date"
-            value={filters.date}
-            onChange={event => onChange('date', event.target.value)}
-          />
-        </label>
+        <DiscoveryDatePicker ariaLabel="Availability filter" className="filter-control filter-control--date" minDate={minDate} onChange={value => onChange('date', value)} value={filters.date} />
 
-        <label className="min-w-36 flex-1 sm:flex-none">
-          <span className="sr-only">Maximum consultation fee</span>
-          <select className={filterSelectClass()} value={filters.maxFee} onChange={event => onChange('maxFee', event.target.value)}>
-            {feeOptions.map(option => <option key={option.label} value={option.value}>{option.label}</option>)}
-          </select>
-        </label>
+        <DiscoverySelect ariaLabel="Fee filter" className="filter-control filter-control--secondary" onChange={value => onChange('maxFee', value)} options={feeOptions} placeholder="Fee" value={filters.maxFee} />
 
-        <label className="min-w-40 flex-1 sm:flex-none">
-          <span className="sr-only">Minimum experience</span>
-          <select className={filterSelectClass()} value={filters.minExperience} onChange={event => onChange('minExperience', event.target.value)}>
-            {experienceOptions.map(option => <option key={option.label} value={option.value}>{option.label}</option>)}
-          </select>
-        </label>
+        <DiscoverySelect ariaLabel="Experience filter" className="filter-control filter-control--secondary" onChange={value => onChange('minExperience', value)} options={experienceOptions} placeholder="Experience" value={filters.minExperience} />
 
-        <button
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 hover:border-blue-300 hover:text-blue-700"
-          onClick={openAllFilters}
-          type="button"
-        >
-          <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+        <button aria-label="All filters" className={`filter-all ${activeCount > 0 ? 'filter-all--active' : ''}`} onClick={openAllFilters} type="button">
+          <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
             <path d="M4 6h16M7 12h10M10 18h4" strokeLinecap="round" />
           </svg>
-          All filters{activeCount > 0 && ` (${activeCount})`}
+          Filters{activeCount > 0 && <span className="filter-count">{activeCount}</span>}
         </button>
 
         {activeCount > 0 && (
-          <button className="min-h-11 px-2 text-sm font-semibold text-blue-700 hover:text-blue-800" onClick={onClear} type="button">
-            Clear
-          </button>
+          <button className="filter-clear" onClick={onClear} type="button">Clear all</button>
         )}
       </div>
 
       {allFiltersOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 sm:items-center sm:p-6"
-          onMouseDown={event => {
-            if (event.target === event.currentTarget) closeAllFilters()
-          }}
-          role="presentation"
-        >
-          <section
-            className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-6 shadow-2xl sm:max-w-xl sm:rounded-2xl"
-            ref={dialogRef}
-            role="dialog"
-            aria-labelledby="all-filters-heading"
-            aria-modal="true"
-          >
-            <div className="flex items-center justify-between gap-4">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#07182C]/52 p-0 backdrop-blur-[2px] sm:items-center sm:p-6" onMouseDown={event => {
+          if (event.target === event.currentTarget) closeAllFilters()
+        }} role="presentation">
+          <section className="all-filters-dialog max-h-[94vh] w-full overflow-y-auto rounded-t-xl bg-[#F8F6F1] p-5 shadow-2xl sm:max-w-xl sm:rounded-xl sm:p-7" ref={dialogRef} role="dialog" aria-labelledby="all-filters-heading" aria-modal="true">
+            <div className="flex items-start justify-between gap-4 border-b border-[#0F2747]/10 pb-4">
               <div>
-                <p className="text-sm font-semibold text-blue-700">Refine your search</p>
-                <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950" id="all-filters-heading">All filters</h2>
+                <p className="editorial-eyebrow">Refine search</p>
+                <h2 className="mt-2.5 text-3xl font-medium tracking-[-0.035em] text-[#0F2747]" id="all-filters-heading">All filters</h2>
               </div>
-              <button
-                className="grid size-10 place-items-center rounded-full text-2xl text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2"
-                onClick={closeAllFilters}
-                ref={closeButtonRef}
-                type="button"
-                aria-label="Close all filters"
-              >
-                ×
-              </button>
+              <button className="all-filters-close" onClick={closeAllFilters} ref={closeButtonRef} type="button" aria-label="Close all filters">×</button>
             </div>
 
-            <div className="mt-6 grid gap-5 sm:grid-cols-2">
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <FilterField label="Specialization">
-                <select className={filterSelectClass()} value={draft.specialization} onChange={event => updateDraft('specialization', event.target.value)}>
-                  <option value="">All specializations</option>
-                  {specializations.map(item => <option key={item.id} value={item.name}>{item.name}</option>)}
-                </select>
+                <DiscoverySelect ariaLabel="Specialization" onChange={value => updateDraft('specialization', value)} options={specializationOptions} placeholder="All specializations" value={draft.specialization} variant="field" />
               </FilterField>
               <FilterField label="Available on">
-                <input className={filterSelectClass()} min={minDate} type="date" value={draft.date} onChange={event => updateDraft('date', event.target.value)} />
+                <DiscoveryDatePicker ariaLabel="Available on" minDate={minDate} onChange={value => updateDraft('date', value)} value={draft.date} variant="field" />
               </FilterField>
               <FilterField label="Consultation fee">
-                <select className={filterSelectClass()} value={draft.maxFee} onChange={event => updateDraft('maxFee', event.target.value)}>
-                  {feeOptions.map(option => <option key={option.label} value={option.value}>{option.label}</option>)}
-                </select>
+                <DiscoverySelect ariaLabel="Consultation fee" onChange={value => updateDraft('maxFee', value)} options={feeOptions} placeholder="Any fee" value={draft.maxFee} variant="field" />
               </FilterField>
               <FilterField label="Experience">
-                <select className={filterSelectClass()} value={draft.minExperience} onChange={event => updateDraft('minExperience', event.target.value)}>
-                  {experienceOptions.map(option => <option key={option.label} value={option.value}>{option.label}</option>)}
-                </select>
+                <DiscoverySelect ariaLabel="Experience" onChange={value => updateDraft('minExperience', value)} options={experienceOptions} placeholder="Any experience" value={draft.minExperience} variant="field" />
               </FilterField>
             </div>
 
-            <div className="mt-8 flex items-center justify-between gap-4 border-t border-slate-200 pt-5">
-              <button className="min-h-11 px-2 text-sm font-semibold text-blue-700" onClick={() => setDraft({ specialization: '', date: '', maxFee: '', minExperience: '' })} type="button">
-                Reset filters
-              </button>
-              <button className="min-h-11 rounded-lg bg-blue-700 px-6 text-sm font-semibold text-white hover:bg-blue-800" onClick={applyDraft} type="button">
-                Show results
-              </button>
+            <div className="mt-6 flex items-center justify-between gap-4 border-t border-[#0F2747]/10 pt-5">
+              <button className="min-h-11 px-2 text-sm font-semibold text-[#245F54] hover:text-[#0F2747]" onClick={() => setDraft({ specialization: '', date: '', maxFee: '', minExperience: '' })} type="button">Reset filters</button>
+              <button className="primary-cta min-h-11 rounded-md bg-[#0F2747] px-6 text-sm font-semibold text-white hover:bg-[#173960] focus:outline-none focus:ring-2 focus:ring-[#2C7A68] focus:ring-offset-2" onClick={applyDraft} type="button">Show results</button>
             </div>
           </section>
         </div>
