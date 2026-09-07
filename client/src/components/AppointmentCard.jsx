@@ -15,6 +15,9 @@ export function AppointmentCard({ appointment, audience }) {
             <StatusBadge status={appointment.status} />
           </div>
           <p className="mt-1 text-sm font-medium text-blue-700">{personLabel}</p>
+          {audience === 'doctor' && appointment.status === 'booked' && appointment.consultationFlow?.readyAt && (
+            <p className="mt-2 inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800">Patient Waiting</p>
+          )}
         </div>
         <p className="shrink-0 text-sm font-semibold text-slate-900">{formatFee(appointment.feeSnapshot)}</p>
       </div>

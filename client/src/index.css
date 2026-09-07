@@ -1316,6 +1316,50 @@ select {
 .appointment-state-panel__reschedule:focus-visible,
 .appointment-state-panel__cancel:focus-visible { outline: 2px solid #2c7a68; outline-offset: 3px; }
 .appointment-state-panel__past-note { margin-top: 1.5rem; border-top: 1px solid rgba(15, 39, 71, 0.14); padding-top: 1.15rem; color: #65736f; font-size: 0.8rem; line-height: 1.6; }
+.consultation-actions { display: grid; gap: 0.72rem; margin-top: 1.35rem; border-top: 1px solid rgba(15, 39, 71, 0.14); padding-top: 1.2rem; }
+.consultation-primary-button { display: inline-flex; min-height: 2.9rem; align-items: center; justify-content: center; border: 1px solid #174e43; border-radius: 0.4rem; background: #174e43; padding: 0.68rem 1rem; color: white; font-size: 0.84rem; font-weight: 720; }
+.consultation-primary-button:hover { border-color: #0f3d35; background: #0f3d35; }
+.consultation-primary-button:disabled { cursor: wait; opacity: 0.58; }
+.consultation-secondary-button { display: inline-flex; min-height: 2.8rem; align-items: center; justify-content: center; border: 1px solid rgba(15, 39, 71, 0.35); border-radius: 0.4rem; padding: 0.65rem 1rem; color: #0f2747; font-size: 0.82rem; font-weight: 700; }
+.consultation-text-button { justify-self: start; min-height: 2.55rem; color: #536863; font-size: 0.78rem; font-weight: 680; text-decoration: underline; text-decoration-color: rgba(83, 104, 99, 0.35); text-underline-offset: 0.24rem; }
+.consultation-state-callout { display: grid; gap: 0.28rem; border-left: 3px solid #2c7a68; background: #e5eee9; padding: 0.82rem 0.9rem; color: #21483f; }
+.consultation-state-callout strong { font-size: 0.84rem; }
+.consultation-state-callout span, .consultation-state-callout small { color: #526a63; font-size: 0.76rem; line-height: 1.45; }
+.consultation-state-callout--ready { border-left-color: #517d68; background: #dfeae3; }
+.consultation-state-callout--quiet { border-left-color: #a89a7c; background: #ebe6dc; color: #5e563f; }
+.consultation-waiting-copy { color: #536863; font-size: 0.8rem; font-weight: 650; }
+.consultation-action-error, .consultation-room-error { border: 1px solid #dfc4bc; background: #f6ebe7; padding: 0.72rem 0.8rem; color: #7d463d; font-size: 0.78rem; line-height: 1.5; }
+.consultation-dialog-backdrop { position: fixed; z-index: 70; inset: 0; display: grid; place-items: center; overflow-y: auto; background: rgba(8, 25, 43, 0.68); padding: 1.25rem; }
+.consultation-dialog { width: min(100%, 35rem); border: 1px solid rgba(15, 39, 71, 0.16); border-radius: 0.72rem; background: #f8f6f1; padding: 1.5rem; box-shadow: 0 24px 70px -35px rgba(4, 18, 33, 0.8); }
+.consultation-dialog--precall, .consultation-dialog--device { width: min(100%, 42rem); }
+.consultation-dialog__eyebrow { color: #2c7a68; font-size: 0.69rem; font-weight: 760; letter-spacing: 0.15em; text-transform: uppercase; }
+.consultation-dialog h2 { margin-top: 0.45rem; color: #0f2747; font-size: 1.65rem; font-weight: 630; letter-spacing: -0.035em; }
+.consultation-dialog__intro { margin-top: 0.65rem; color: #5d6e69; font-size: 0.86rem; line-height: 1.6; }
+.consultation-dialog__actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; margin-top: 1.25rem; }
+.device-check { display: grid; gap: 1rem; margin-top: 1.15rem; }
+.device-check__preview { position: relative; display: grid; min-height: 13rem; place-items: center; overflow: hidden; border: 1px solid rgba(15, 39, 71, 0.18); border-radius: 0.55rem; background: #132b3d; color: #dce5e2; }
+.device-check__preview video { position: absolute; width: 100%; height: 100%; object-fit: cover; }
+.device-check__preview span { z-index: 1; font-size: 0.8rem; }
+.device-check__statuses { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.7rem; }
+.device-check__statuses > div { border: 1px solid rgba(15, 39, 71, 0.13); background: #eeebe3; padding: 0.72rem; }
+.device-check__statuses dt { color: #62716c; font-size: 0.68rem; font-weight: 720; letter-spacing: 0.08em; text-transform: uppercase; }
+.device-check__statuses dd { margin-top: 0.25rem; color: #0f2747; font-size: 0.82rem; font-weight: 700; }
+.device-check__statuses dd[data-state='available'] { color: #276151; }
+.device-check__statuses dd[data-state='denied'], .device-check__statuses dd[data-state='unavailable'] { color: #895247; }
+.device-check__message { color: #7d463d; font-size: 0.78rem; line-height: 1.5; }
+.device-check__privacy { color: #71807a; font-size: 0.72rem; line-height: 1.5; }
+.consultation-room-shell { position: fixed; z-index: 65; inset: 0; display: grid; min-width: 0; grid-template-rows: auto auto minmax(0, 1fr) auto; background: #f8f6f1; color: #0f2747; }
+.consultation-room-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid rgba(15, 39, 71, 0.14); padding: 0.85rem 1.25rem; }
+.consultation-room-header p { color: #2c7a68; font-size: 0.65rem; font-weight: 750; letter-spacing: 0.13em; text-transform: uppercase; }
+.consultation-room-header h2 { margin-top: 0.2rem; font-size: 1.15rem; font-weight: 650; }
+.consultation-room-header button { min-height: 2.5rem; border: 1px solid rgba(15, 39, 71, 0.3); padding: 0.5rem 0.8rem; font-size: 0.78rem; font-weight: 700; }
+.consultation-room-status { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px solid rgba(15, 39, 71, 0.1); background: #e4ece7; padding: 0.65rem 1.25rem; color: #355c51; font-size: 0.78rem; }
+.consultation-room-frame { min-width: 0; min-height: 22rem; background: #102435; }
+.consultation-room-frame iframe { display: block; width: 100% !important; height: 100% !important; border: 0; }
+.consultation-room-footer { display: flex; align-items: center; justify-content: space-between; gap: 1.25rem; border-top: 1px solid rgba(15, 39, 71, 0.14); padding: 0.8rem 1.25rem; }
+.consultation-room-footer div { display: grid; gap: 0.2rem; }
+.consultation-room-footer strong { font-size: 0.84rem; }
+.consultation-room-footer span { color: #64736f; font-size: 0.74rem; }
 .appointment-detail-reference { grid-area: reference; border-top: 1px solid rgba(15, 39, 71, 0.14); padding-top: 1.05rem; color: #78837f; font-size: 0.76rem; line-height: 1.6; }
 .appointment-detail-history { grid-area: history; margin-top: 2.2rem; border-top: 1px solid rgba(15, 39, 71, 0.18); padding: 2.2rem 0; }
 .appointment-detail-history > h2 { margin-top: 0.45rem; color: #0f2747; font-size: 1.75rem; font-weight: 620; letter-spacing: -0.04em; }
@@ -1349,6 +1393,14 @@ select {
   .appointment-state-panel__reschedule { width: 100%; }
   .appointment-state-panel__cancel { min-height: 2.8rem; }
   .appointment-detail-history > h2 { font-size: 1.55rem; }
+  .consultation-dialog-backdrop { align-items: end; padding: 0; }
+  .consultation-dialog { max-height: 94vh; overflow-y: auto; border-radius: 0.8rem 0.8rem 0 0; padding: 1.2rem; }
+  .consultation-dialog__actions { grid-template-columns: minmax(0, 1fr); }
+  .device-check__preview { min-height: 10.5rem; }
+  .consultation-room-header, .consultation-room-status, .consultation-room-footer { padding-right: 0.85rem; padding-left: 0.85rem; }
+  .consultation-room-status { flex-direction: column; gap: 0.18rem; }
+  .consultation-room-footer { align-items: stretch; flex-direction: column; }
+  .consultation-room-frame { min-height: 18rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

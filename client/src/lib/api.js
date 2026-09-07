@@ -101,6 +101,22 @@ export function rescheduleAppointment(appointmentId, slotId) {
   })
 }
 
+export function markAppointmentReady(appointmentId) {
+  return requestJson(`/api/appointments/${appointmentId}/ready`, { method: 'POST' })
+}
+
+export function openAppointmentRoom(appointmentId) {
+  return requestJson(`/api/appointments/${appointmentId}/open-room`, { method: 'POST' })
+}
+
+export function beginAppointmentConsultation(appointmentId) {
+  return requestJson(`/api/appointments/${appointmentId}/begin-consultation`, { method: 'POST' })
+}
+
+export function markAppointmentNoShow(appointmentId) {
+  return requestJson(`/api/appointments/${appointmentId}/no-show`, { method: 'POST' })
+}
+
 export function getAppointmentVideoSession(appointmentId, signal) {
   return requestJson(`/api/appointments/${appointmentId}/video-token`, {
     method: 'POST',

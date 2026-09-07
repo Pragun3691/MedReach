@@ -133,8 +133,14 @@ The reusable `JaasMeeting` component loads
 microphone, camera, and hangup, exposes participant and local media events, and
 disposes the IFrame API on unmount. Active Consultations can request fresh
 tokens after slot end for reconnects. Leaving or hanging up never finishes a
-MedReach Consultation. This foundation does not yet add a user-visible video
-consultation page or clinical workflow UI.
+MedReach Consultation.
+
+Appointment Details now presents the pre-consultation workflow from the
+backend-derived lifecycle capabilities: Patient check-in and waiting, Doctor
+room opening, a compact browser-only camera/microphone check, authorized room
+entry, participant-presence feedback, explicit Doctor confirmation before
+beginning the Consultation, and manual no-show confirmation. It does not yet
+include the clinical workspace, notes, prescriptions, follow-up, or Finish UI.
 
 ## Known exclusions
 
