@@ -339,6 +339,92 @@ select {
   .patient-appointments__empty a span { transition: none; }
 }
 
+/* Appointment detail workspace */
+.appointment-detail-page { background: #f8f6f1; color: #0f2747; }
+.appointment-detail-shell { width: min(100%, 80rem); margin: 0 auto; padding: 2.1rem 2.5rem 6rem; }
+.appointment-detail-back { display: inline-flex; align-items: center; gap: 0.55rem; color: #52666d; font-size: 0.86rem; font-weight: 650; text-decoration: none; }
+.appointment-detail-back span { transition: transform 200ms ease; }
+.appointment-detail-back:hover { color: #174e43; }
+.appointment-detail-back:hover span { transform: translateX(-3px); }
+.appointment-detail-back:focus-visible { border-radius: 2px; outline: 2px solid #2c7a68; outline-offset: 5px; }
+.appointment-detail-workspace { display: grid; grid-template-areas: 'summary panel' 'reference panel' 'history panel'; grid-template-columns: minmax(0, 1.65fr) minmax(19rem, 0.9fr); gap: 0 4.5rem; align-items: start; margin-top: clamp(2rem, 4vw, 3.6rem); }
+.appointment-detail-summary { grid-area: summary; padding-bottom: 2.8rem; }
+.appointment-detail-eyebrow,
+.appointment-state-panel__eyebrow { color: #2c7a68; font-size: 0.7rem; font-weight: 760; letter-spacing: 0.17em; text-transform: uppercase; }
+.appointment-detail-summary > h1 { max-width: 39rem; margin-top: 0.65rem; color: #0f2747; font-size: clamp(2.2rem, 4.5vw, 3.75rem); font-weight: 620; line-height: 1.02; letter-spacing: -0.055em; }
+.appointment-detail-primary-time { margin-top: 0.65rem; color: #263c4d; font-size: clamp(1.25rem, 2.2vw, 1.65rem); font-weight: 620; letter-spacing: -0.025em; }
+.appointment-detail-doctor { display: flex; gap: 1.35rem; align-items: center; margin-top: 2.5rem; }
+.appointment-detail-doctor__portrait { display: grid; width: 6.5rem; aspect-ratio: 4 / 5; flex: 0 0 auto; place-items: center; overflow: hidden; border: 1px solid rgba(15, 39, 71, 0.14); border-radius: 0.58rem; background: #dce9e3; color: #123b3a; font-size: 1.45rem; font-weight: 650; letter-spacing: 0.055em; }
+.appointment-detail-doctor__portrait img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.005); transition: transform 500ms cubic-bezier(0.16, 1, 0.3, 1); }
+.appointment-detail-doctor:hover .appointment-detail-doctor__portrait img { transform: scale(1.018); }
+.appointment-detail-doctor h2 { color: #0f2747; font-size: clamp(1.45rem, 2.5vw, 1.8rem); font-weight: 620; line-height: 1.15; letter-spacing: -0.04em; }
+.appointment-detail-doctor p { margin-top: 0.4rem; color: #2c7a68; font-size: 0.86rem; font-weight: 660; }
+.appointment-detail-doctor a { display: inline-flex; align-items: center; gap: 0.5rem; margin-top: 0.9rem; color: #435b60; font-size: 0.8rem; font-weight: 680; text-decoration: none; }
+.appointment-detail-doctor a span { transition: transform 200ms ease; }
+.appointment-detail-doctor a:hover { color: #174e43; }
+.appointment-detail-doctor a:hover span { transform: translateX(4px); }
+.appointment-detail-doctor a:focus-visible { border-radius: 2px; outline: 2px solid #2c7a68; outline-offset: 4px; }
+.appointment-state-panel { position: sticky; top: 6.35rem; grid-area: panel; border: 1px solid rgba(15, 39, 71, 0.16); border-radius: 0.72rem; background: #f1eee6; padding: 1.55rem; box-shadow: 0 18px 46px -43px rgba(15, 39, 71, 0.66); }
+.appointment-state-panel > .patient-appointment-status { margin-top: 1rem; }
+.appointment-state-panel__schedule { display: grid; gap: 0.3rem; margin-top: 1.5rem; border-top: 1px solid rgba(15, 39, 71, 0.14); padding-top: 1.3rem; }
+.appointment-state-panel__schedule strong { color: #0f2747; font-size: 1.12rem; font-weight: 650; letter-spacing: -0.025em; }
+.appointment-state-panel__schedule > span { color: #1d3449; font-size: 0.98rem; font-weight: 620; }
+.appointment-state-panel__schedule p { margin-top: 0.4rem; color: #65736f; font-size: 0.8rem; }
+.appointment-state-panel__fee { margin-top: 1.25rem; color: #40514d; font-size: 0.88rem; font-weight: 690; }
+.appointment-state-panel__management { display: grid; gap: 0.7rem; margin-top: 1.5rem; border-top: 1px solid rgba(15, 39, 71, 0.14); padding-top: 1.25rem; }
+.appointment-state-panel__management > p { margin-bottom: 0.15rem; color: #707b77; font-size: 0.67rem; font-weight: 740; letter-spacing: 0.12em; text-transform: uppercase; }
+.appointment-state-panel__reschedule { display: inline-flex; min-height: 2.8rem; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid rgba(15, 39, 71, 0.46); border-radius: 0.38rem; padding: 0.65rem 0.85rem; color: #0f2747; font-size: 0.84rem; font-weight: 700; text-decoration: none; transition: border-color 180ms ease, background-color 180ms ease, color 180ms ease; }
+.appointment-state-panel__reschedule span { transition: transform 200ms ease; }
+.appointment-state-panel__reschedule:hover { border-color: #0f2747; background: #0f2747; color: white; }
+.appointment-state-panel__reschedule:hover span { transform: translateX(3px); }
+.appointment-state-panel__cancel { justify-self: start; min-height: 2.65rem; color: #8a5147; font-size: 0.8rem; font-weight: 680; text-decoration: underline; text-decoration-color: rgba(138, 81, 71, 0.35); text-underline-offset: 0.25rem; }
+.appointment-state-panel__cancel:hover { color: #6f3c34; text-decoration-color: currentColor; }
+.appointment-state-panel__reschedule:focus-visible,
+.appointment-state-panel__cancel:focus-visible { outline: 2px solid #2c7a68; outline-offset: 3px; }
+.appointment-state-panel__past-note { margin-top: 1.5rem; border-top: 1px solid rgba(15, 39, 71, 0.14); padding-top: 1.15rem; color: #65736f; font-size: 0.8rem; line-height: 1.6; }
+.appointment-detail-reference { grid-area: reference; border-top: 1px solid rgba(15, 39, 71, 0.14); padding-top: 1.05rem; color: #78837f; font-size: 0.76rem; line-height: 1.6; }
+.appointment-detail-history { grid-area: history; margin-top: 2.2rem; border-top: 1px solid rgba(15, 39, 71, 0.18); padding: 2.2rem 0; }
+.appointment-detail-history > h2 { margin-top: 0.45rem; color: #0f2747; font-size: 1.75rem; font-weight: 620; letter-spacing: -0.04em; }
+.appointment-detail-history > div,
+.appointment-detail-history > p:not(.appointment-detail-eyebrow) { margin-top: 1rem; color: #596965; font-size: 0.86rem; line-height: 1.65; }
+.appointment-detail-history a { color: #174e43; font-weight: 700; text-underline-offset: 0.2rem; }
+.appointment-detail-loading { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(19rem, 0.9fr); gap: 4.5rem; margin-top: 3.6rem; }
+.appointment-detail-loading div { height: 28rem; border: 1px solid #e0dbd2; border-radius: 0.7rem; background: #fffdf9; }
+.appointment-detail-error { margin-top: 3rem; border-top: 1px solid #dfc4bc; border-bottom: 1px solid #dfc4bc; padding: 2.2rem 0; text-align: center; }
+.appointment-detail-error h1 { font-size: 1.6rem; font-weight: 630; letter-spacing: -0.035em; }
+.appointment-detail-error p { margin-top: 0.55rem; color: #65736f; }
+.appointment-detail-error button { margin-top: 1.2rem; border: 1px solid #0f2747; padding: 0.65rem 1rem; color: #0f2747; font-size: 0.84rem; font-weight: 700; }
+
+@media (max-width: 900px) {
+  .appointment-detail-workspace { grid-template-areas: 'summary' 'panel' 'reference' 'history'; grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .appointment-state-panel { position: static; margin-bottom: 2.6rem; }
+  .appointment-detail-loading { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .appointment-detail-loading div { height: 18rem; }
+}
+
+@media (max-width: 639px) {
+  .appointment-detail-shell { padding: 1.45rem 1.25rem 4.5rem; }
+  .appointment-detail-workspace { margin-top: 2rem; }
+  .appointment-detail-summary { padding-bottom: 2rem; }
+  .appointment-detail-summary > h1 { font-size: 2.15rem; }
+  .appointment-detail-primary-time { font-size: 1.28rem; }
+  .appointment-detail-doctor { gap: 1rem; margin-top: 1.8rem; }
+  .appointment-detail-doctor__portrait { width: 5.15rem; }
+  .appointment-detail-doctor h2 { font-size: 1.35rem; }
+  .appointment-state-panel { margin-bottom: 2.25rem; padding: 1.25rem; }
+  .appointment-state-panel__reschedule { width: 100%; }
+  .appointment-state-panel__cancel { min-height: 2.8rem; }
+  .appointment-detail-history > h2 { font-size: 1.55rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .appointment-detail-back span,
+  .appointment-detail-doctor__portrait img,
+  .appointment-detail-doctor a span,
+  .appointment-state-panel__reschedule,
+  .appointment-state-panel__reschedule span { transition: none; }
+}
+
 .discovery-control__trigger {
   display: inline-flex;
   width: 100%;
