@@ -96,7 +96,7 @@ export function DoctorProfilePage() {
     const nextParams = new URLSearchParams(searchParams)
     nextParams.set('date', date)
     nextParams.delete('slot')
-    setSearchParams(nextParams)
+    setSearchParams(nextParams, { replace: true })
   }
 
   if (loading) {

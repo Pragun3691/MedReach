@@ -1114,6 +1114,7 @@ select {
 }
 
 .booking-date-option {
+  position: relative;
   min-width: 0;
   min-height: 4.15rem;
   border: 1px solid rgba(15, 39, 71, 0.14);
@@ -1123,6 +1124,24 @@ select {
   color: #53625f;
   text-align: center;
   transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
+}
+
+.booking-date-option.is-available::after {
+  position: absolute;
+  right: 50%;
+  bottom: 0.34rem;
+  width: 0.28rem;
+  height: 0.28rem;
+  border-radius: 999px;
+  background: #2c7a68;
+  content: '';
+  transform: translateX(50%);
+}
+
+.booking-date-option.is-unavailable:not(.is-selected) {
+  border-color: rgba(15, 39, 71, 0.08);
+  background: #f3f1eb;
+  color: #87908d;
 }
 
 .booking-date-option > span {
@@ -1144,6 +1163,7 @@ select {
 
 .booking-date-option:hover { border-color: rgba(44, 122, 104, 0.48); background: #edf3ee; color: #174d45; }
 .booking-date-option.is-selected { border-color: #0f2747; background: #0f2747; color: #fffdf9; }
+.booking-date-option.is-selected.is-available::after { background: #a8e6cf; }
 .booking-date-option:focus-visible { outline: 2px solid #2c7a68; outline-offset: 2px; }
 
 .booking-another-date {

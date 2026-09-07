@@ -40,6 +40,7 @@ export function DoctorAvailability({ doctor, selectedDate, requestedSlotId, resc
   const { status } = useAuth()
   const [requestVersion, setRequestVersion] = useState(0)
   const [slotState, setSlotState] = useState({ key: null, data: null, error: null })
+  const [dateAvailabilityState, setDateAvailabilityState] = useState({ key: null, values: {} })
   const [selection, setSelection] = useState(null)
   const [bookingOpen, setBookingOpen] = useState(false)
   const [activeSlot, setActiveSlot] = useState(null)
@@ -53,6 +54,7 @@ export function DoctorAvailability({ doctor, selectedDate, requestedSlotId, resc
   }, [])
   const requestKey = `${doctor.id}:${selectedDate}:${requestVersion}`
   const dates = useMemo(() => visibleDates(selectedDate), [selectedDate])
+  const dateAvailabilityKey = `${doctor.id}:${dates.join(',')}:${requestVersion}`
 
   useEffect(() => {
     const controller = new AbortController()
@@ -66,6 +68,22 @@ export function DoctorAvailability({ doctor, selectedDate, requestedSlotId, resc
 
     return () => controller.abort()
   }, [doctor.id, requestKey, selectedDate])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const currentKey = dateAvailabilityKey
+
+    Promise.all(dates.map(async date => {
+      const data = await getDoctorSlots(doctor.id, date, controller.signal)
+      return [date, (data.items?.length ?? 0) > 0]
+    }))
+      .then(entries => setDateAvailabilityState({ key: currentKey, values: Object.fromEntries(entries) }))
+      .catch(error => {
+        if (error.name !== 'AbortError') setDateAvailabilityState({ key: currentKey, values: {} })
+      })
+
+    return () => controller.abort()
+  }, [dateAvailabilityKey, dates, doctor.id])
 
   const loading = slotState.key !== requestKey
   const slots = loading ? [] : (slotState.data?.items ?? [])
@@ -87,13 +105,17 @@ export function DoctorAvailability({ doctor, selectedDate, requestedSlotId, resc
       <div className="booking-date-strip" aria-label="Choose an appointment date">
         {dates.map(date => {
           const label = formatDay(date, selectedDate)
+          const availability = dateAvailabilityState.key === dateAvailabilityKey
+            ? dateAvailabilityState.values[date]
+            : undefined
           return (
             <button
-              className={`booking-date-option ${label.selected ? 'is-selected' : ''}`}
+              className={`booking-date-option ${label.selected ? 'is-selected' : ''} ${availability === true ? 'is-available' : availability === false ? 'is-unavailable' : ''}`}
               key={date}
               onClick={() => onDateChange(date)}
               type="button"
               aria-pressed={label.selected}
+              aria-label={`${label.weekday}, ${label.calendarDate}${availability === true ? ', available' : availability === false ? ', no availability' : ''}`}
             >
               <span>{label.weekday}</span>
               <strong>{label.calendarDate}</strong>

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { DiscoverySelect } from './DiscoveryControls.jsx'
 
 const searchTypes = [
@@ -10,6 +10,7 @@ const searchTypes = [
 
 export function DiscoverySearch({ initialType = 'problem', initialQuery = '', className = 'mt-8', tone = 'default' }) {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchType, setSearchType] = useState(initialType)
   const [query, setQuery] = useState(initialQuery)
   const isHero = tone === 'hero'
@@ -21,7 +22,7 @@ export function DiscoverySearch({ initialType = 'problem', initialQuery = '', cl
     if (!normalizedQuery) return
 
     const params = new URLSearchParams({ [searchType]: normalizedQuery })
-    navigate(`/doctors?${params.toString()}`)
+    navigate(`/doctors?${params.toString()}`, { replace: location.pathname === '/doctors' })
   }
 
   return (

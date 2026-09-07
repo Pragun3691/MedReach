@@ -87,7 +87,7 @@ export function PublicHeader({ overlay = false, editorial = false }) {
   }
 
   return (
-    <header className={`${overlay ? 'fixed inset-x-0 top-0 z-50' : editorial ? 'sticky top-0 z-50' : 'relative'} border-b transition-[background-color,border-color,box-shadow,backdrop-filter] duration-300 ${inverse ? 'border-white/15 bg-transparent' : editorial ? 'border-[#0F2747]/12 bg-[#F8F6F1]/96 shadow-[0_10px_30px_-25px_rgba(15,39,71,0.55)] backdrop-blur-md' : 'border-slate-200/90 bg-[#F8F6F1]/95 shadow-[0_10px_30px_-24px_rgba(15,39,71,0.7)] backdrop-blur-md'}`}>
+    <header className={`${overlay ? 'fixed inset-x-0 top-0 z-50' : 'sticky top-0 z-50'} border-b transition-[background-color,border-color,box-shadow,backdrop-filter] duration-300 ${inverse ? 'border-white/15 bg-transparent' : overlay ? 'border-slate-200/90 bg-[#F8F6F1]/95 shadow-[0_10px_30px_-24px_rgba(15,39,71,0.7)] backdrop-blur-md' : editorial ? 'border-[#D9D1C5] bg-[#F3EFE6] shadow-[0_10px_30px_-25px_rgba(15,39,71,0.55)] backdrop-blur-md' : 'border-[#D9D1C5] bg-[#F3EFE6] shadow-[0_10px_30px_-24px_rgba(15,39,71,0.7)] backdrop-blur-md'}`}>
       <div className={`mx-auto flex max-w-7xl items-center justify-between gap-3 px-5 transition-[min-height] duration-300 sm:px-8 lg:px-10 ${hasScrolled ? 'min-h-16' : 'min-h-[4.75rem]'}`}>
         <Brand inverse={inverse} />
 

@@ -99,7 +99,7 @@ export function DoctorResultsPage() {
     if (value) nextParams.set(key, value)
     else nextParams.delete(key)
     nextParams.delete('offset')
-    setSearchParams(nextParams)
+    setSearchParams(nextParams, { replace: true })
   }
 
   function applyFilters(values) {
@@ -109,21 +109,21 @@ export function DoctorResultsPage() {
       else nextParams.delete(key)
     }
     nextParams.delete('offset')
-    setSearchParams(nextParams)
+    setSearchParams(nextParams, { replace: true })
   }
 
   function clearFilters() {
     const nextParams = new URLSearchParams(searchParams)
     for (const key of filterKeys) nextParams.delete(key)
     nextParams.delete('offset')
-    setSearchParams(nextParams)
+    setSearchParams(nextParams, { replace: true })
   }
 
   function changePage(nextOffset) {
     const nextParams = new URLSearchParams(searchParams)
     if (nextOffset > 0) nextParams.set('offset', String(nextOffset))
     else nextParams.delete('offset')
-    setSearchParams(nextParams)
+    setSearchParams(nextParams, { replace: true })
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -135,7 +135,7 @@ export function DoctorResultsPage() {
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-[#F8F6F1] text-[#1D2A35]">
+    <div className="min-h-screen overflow-x-clip bg-[#F8F6F1] text-[#1D2A35]">
       <PublicHeader editorial />
 
       <main>
