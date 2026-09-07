@@ -74,6 +74,11 @@ Doctor profiles remain private until their verification is approved.
 - `GET /api/appointments/:appointmentId` — owning Patient or assigned Doctor gets safe details
 - `POST /api/appointments/:appointmentId/cancel` — owning Patient or assigned Doctor cancels
 - `POST /api/appointments/:appointmentId/reschedule` — owning Patient reschedules
+- `POST /api/appointments/:appointmentId/ready` — owning Patient marks Ready from T-15 until slot end
+- `POST /api/appointments/:appointmentId/open-room` — assigned Doctor opens the room from T-5 until slot end
+- `POST /api/appointments/:appointmentId/begin-consultation` — assigned Doctor begins the clinical encounter after opening the room
+- `POST /api/appointments/:appointmentId/no-show` — assigned Doctor manually records no-show from T+15 onward
+- `POST /api/appointments/:appointmentId/consultation/finish` — assigned Doctor finishes an active consultation
 - `GET /api/doctors/me/appointments` — Doctor lists assigned appointments
 
 Booking and rescheduling are transactional. PostgreSQL row locks and a partial
@@ -89,8 +94,24 @@ block rather than being duplicated on the appointment record.
 Notifications are stored message snapshots with backend-generated internal
 action paths. Authenticated users can list and mark only their own notifications.
 
+## Consultation lifecycle foundation
+
+Patients can mark Ready from 15 minutes before the scheduled start until the
+30-minute slot ends. Assigned Doctors can open a room and begin the clinical
+encounter from five minutes before the start until slot end; opening a room is
+separate from beginning a Consultation. A Patient Ready signal is not required
+to begin. Exactly one Consultation may exist per appointment, and an active
+Consultation may continue beyond slot end until the assigned Doctor explicitly
+finishes it, atomically moving the appointment to `completed`.
+
+No-show is a manual assigned-Doctor action available from 15 minutes after the
+scheduled start with no upper time limit. It is never automatic. Patient
+self-cancellation and rescheduling close at that same T+15 boundary and are
+blocked once a Consultation begins. This checkpoint does not include JaaS,
+Jitsi, video, or consultation user interfaces.
+
 ## Known exclusions
 
 This milestone does not implement payments, video consultations, clinical
-notes, prescriptions, medical history, follow-ups, Patient Ready or no-show
-workflows, administration tools, or email/SMS notifications.
+notes, prescriptions, medical history, follow-ups, consultation user
+interfaces, administration tools, or email/SMS notifications.

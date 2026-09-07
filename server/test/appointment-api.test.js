@@ -290,3 +290,347 @@ describe('appointment booking API', () => {
     expect((await request(app).patch('/api/notifications/5000/read')).status).toBe(401)
   })
 })
+
+describe('consultation lifecycle API', () => {
+  let context
+  let app
+  let patient
+  let otherPatient
+  let doctor
+  let otherDoctor
+  let admin
+  let appointmentId
+  let startAt
+  let endAt
+  let currentTime
+
+  beforeEach(async () => {
+    currentTime = new Date('2030-01-01T00:00:00.000Z')
+    context = createBookingTestContext({ clock: () => currentTime })
+    const lifecycleSlot = context.slots.find(item => item.id === 101)
+    lifecycleSlot.startAt = new Date(currentTime.getTime() + 60 * 60 * 1000).toISOString()
+    lifecycleSlot.endAt = new Date(currentTime.getTime() + 90 * 60 * 1000).toISOString()
+    app = createApp(context.services)
+    patient = await login(app, 'patient@example.test')
+    otherPatient = await login(app, 'other-patient@example.test')
+    doctor = await login(app, 'doctor@example.test')
+    otherDoctor = await login(app, 'other-doctor@example.test')
+    admin = await login(app, 'admin@example.test')
+    const booking = await patient.post('/api/appointments').send({ slotId: 101 })
+    appointmentId = booking.body.appointment.id
+    const slot = context.slots.find(item => item.id === 101)
+    startAt = new Date(slot.startAt)
+    endAt = new Date(slot.endAt)
+  })
+
+  function atMinutesFromStart(minutes) {
+    currentTime = new Date(startAt.getTime() + minutes * 60 * 1000)
+  }
+
+  async function openAndBegin() {
+    atMinutesFromStart(-5)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/open-room`)).status).toBe(200)
+    return doctor.post(`/api/appointments/${appointmentId}/begin-consultation`)
+  }
+
+  it('rejects Ready before T-15 and allows it exactly at T-15', async () => {
+    atMinutesFromStart(-15 - 1 / 60)
+    expect((await patient.post(`/api/appointments/${appointmentId}/ready`)).status).toBe(409)
+    atMinutesFromStart(-15)
+    const response = await patient.post(`/api/appointments/${appointmentId}/ready`)
+    expect(response.status).toBe(200)
+    expect(response.body.appointment.status).toBe('booked')
+    expect(response.body.appointment.consultationFlow.readyAt).toBe(currentTime.toISOString())
+  })
+
+  it('preserves the first Ready timestamp across repeated calls', async () => {
+    atMinutesFromStart(-15)
+    const first = await patient.post(`/api/appointments/${appointmentId}/ready`)
+    atMinutesFromStart(-10)
+    const repeated = await patient.post(`/api/appointments/${appointmentId}/ready`)
+    expect(repeated.status).toBe(200)
+    expect(repeated.body.appointment.consultationFlow.readyAt).toBe(first.body.appointment.consultationFlow.readyAt)
+  })
+
+  it('forbids another Patient from marking Ready', async () => {
+    atMinutesFromStart(-15)
+    const response = await otherPatient.post(`/api/appointments/${appointmentId}/ready`)
+    expect(response.status).toBe(403)
+  })
+
+  it.each(['cancelled', 'rescheduled', 'no_show'])('rejects Ready for a %s appointment', async status => {
+    context.appointments[0].status = status
+    atMinutesFromStart(-15)
+    expect((await patient.post(`/api/appointments/${appointmentId}/ready`)).status).toBe(409)
+  })
+
+  it('rejects Ready after consultation begins and at slot end', async () => {
+    await openAndBegin()
+    expect((await patient.post(`/api/appointments/${appointmentId}/ready`)).status).toBe(409)
+
+    context.consultations.length = 0
+    context.appointments[0].roomOpenedAt = null
+    currentTime = endAt
+    expect((await patient.post(`/api/appointments/${appointmentId}/ready`)).status).toBe(409)
+  })
+
+  it('rejects Open Room before T-5 and allows it exactly at T-5 without Ready', async () => {
+    atMinutesFromStart(-5 - 1 / 60)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/open-room`)).status).toBe(409)
+    atMinutesFromStart(-5)
+    const response = await doctor.post(`/api/appointments/${appointmentId}/open-room`)
+    expect(response.status).toBe(200)
+    expect(response.body.appointment.status).toBe('booked')
+    expect(response.body.appointment.consultationFlow.readyAt).toBeNull()
+    expect(response.body.appointment.consultationFlow.roomOpenedAt).toBe(currentTime.toISOString())
+    expect(context.consultations).toHaveLength(0)
+  })
+
+  it('makes Open Room idempotent and assigned-doctor-only', async () => {
+    atMinutesFromStart(-5)
+    const first = await doctor.post(`/api/appointments/${appointmentId}/open-room`)
+    atMinutesFromStart(0)
+    const repeated = await doctor.post(`/api/appointments/${appointmentId}/open-room`)
+    const forbidden = await otherDoctor.post(`/api/appointments/${appointmentId}/open-room`)
+    expect(repeated.body.appointment.consultationFlow.roomOpenedAt).toBe(first.body.appointment.consultationFlow.roomOpenedAt)
+    expect(forbidden.status).toBe(403)
+  })
+
+  it.each(['cancelled', 'rescheduled', 'no_show'])('rejects Open Room for a %s appointment', async status => {
+    context.appointments[0].status = status
+    atMinutesFromStart(-5)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/open-room`)).status).toBe(409)
+  })
+
+  it('rejects Open Room after consultation begins and at slot end', async () => {
+    await openAndBegin()
+    expect((await doctor.post(`/api/appointments/${appointmentId}/open-room`)).status).toBe(409)
+    context.consultations.length = 0
+    currentTime = endAt
+    expect((await doctor.post(`/api/appointments/${appointmentId}/open-room`)).status).toBe(409)
+  })
+
+  it('requires the room and timing before Begin Consultation', async () => {
+    atMinutesFromStart(-6)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/begin-consultation`)).status).toBe(409)
+    atMinutesFromStart(-5)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/begin-consultation`)).status).toBe(409)
+    await doctor.post(`/api/appointments/${appointmentId}/open-room`)
+    const response = await doctor.post(`/api/appointments/${appointmentId}/begin-consultation`)
+    expect(response.status).toBe(200)
+    expect(response.body.appointment.status).toBe('booked')
+    expect(response.body.appointment.consultationFlow.consultationId).toBeTruthy()
+  })
+
+  it('does not require Ready and creates only one Consultation on duplicate Begin', async () => {
+    const first = await openAndBegin()
+    const repeated = await doctor.post(`/api/appointments/${appointmentId}/begin-consultation`)
+    expect(first.status).toBe(200)
+    expect(first.body.appointment.consultationFlow.readyAt).toBeNull()
+    expect(repeated.status).toBe(200)
+    expect(repeated.body.appointment.consultationFlow.consultationId).toBe(first.body.appointment.consultationFlow.consultationId)
+    expect(context.consultations).toHaveLength(1)
+  })
+
+  it('forbids the wrong doctor from Begin Consultation', async () => {
+    atMinutesFromStart(-5)
+    await doctor.post(`/api/appointments/${appointmentId}/open-room`)
+    expect((await otherDoctor.post(`/api/appointments/${appointmentId}/begin-consultation`)).status).toBe(403)
+  })
+
+  it.each(['cancelled', 'rescheduled', 'no_show'])('rejects Begin Consultation for a %s appointment', async status => {
+    context.appointments[0].status = status
+    context.appointments[0].roomOpenedAt = startAt.toISOString()
+    atMinutesFromStart(-5)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/begin-consultation`)).status).toBe(409)
+  })
+
+  it('rejects first Begin at slot end', async () => {
+    context.appointments[0].roomOpenedAt = new Date(startAt.getTime() - 5 * 60 * 1000).toISOString()
+    currentTime = endAt
+    expect((await doctor.post(`/api/appointments/${appointmentId}/begin-consultation`)).status).toBe(409)
+  })
+
+  it('rejects no-show before T+15 and allows it exactly at T+15 even when Ready', async () => {
+    atMinutesFromStart(-15)
+    await patient.post(`/api/appointments/${appointmentId}/ready`)
+    atMinutesFromStart(15 - 1 / 60)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/no-show`)).status).toBe(409)
+    atMinutesFromStart(15)
+    const response = await doctor.post(`/api/appointments/${appointmentId}/no-show`)
+    expect(response.status).toBe(200)
+    expect(response.body.appointment.status).toBe('no_show')
+    expect(context.appointments[0].noShowMarkedAt).toBe(currentTime.toISOString())
+    expect(context.consultations).toHaveLength(0)
+  })
+
+  it('notifies the Patient once and rejects repeated no-show', async () => {
+    atMinutesFromStart(15)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/no-show`)).status).toBe(200)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/no-show`)).status).toBe(409)
+    const notifications = context.notifications.filter(item => item.type === 'appointment_no_show')
+    expect(notifications).toHaveLength(1)
+    expect(notifications[0]).toMatchObject({ recipient_user_id: 1, action_path: `/appointments/${appointmentId}` })
+    expect(notifications[0].message).toContain('Dr. Aditi Sharma')
+  })
+
+  it('allows assigned-doctor no-show after slot end and for old unresolved bookings', async () => {
+    const slot = context.slots.find(item => item.id === 101)
+    slot.startAt = '2029-12-01T09:00:00.000Z'
+    slot.endAt = '2029-12-01T09:30:00.000Z'
+    expect((await doctor.post(`/api/appointments/${appointmentId}/no-show`)).status).toBe(200)
+  })
+
+  it('forbids wrong-role, admin, wrong-doctor, and begun-consultation no-show', async () => {
+    atMinutesFromStart(15)
+    expect((await patient.post(`/api/appointments/${appointmentId}/no-show`)).status).toBe(403)
+    expect((await admin.post(`/api/appointments/${appointmentId}/no-show`)).status).toBe(403)
+    expect((await otherDoctor.post(`/api/appointments/${appointmentId}/no-show`)).status).toBe(403)
+    atMinutesFromStart(-5)
+    await openAndBegin()
+    atMinutesFromStart(15)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/no-show`)).status).toBe(409)
+  })
+
+  it.each([
+    [14 + 59 / 60, 200],
+    [15, 409],
+    [16, 409],
+  ])('applies the Patient cancel cutoff at T+%s minutes', async (minutes, expectedStatus) => {
+    atMinutesFromStart(minutes)
+    const response = await patient.post(`/api/appointments/${appointmentId}/cancel`).send({})
+    expect(response.status).toBe(expectedStatus)
+  })
+
+  it.each([
+    [14 + 59 / 60, 200],
+    [15, 409],
+    [16, 409],
+  ])('applies the Patient reschedule cutoff at T+%s minutes', async (minutes, expectedStatus) => {
+    atMinutesFromStart(minutes)
+    const response = await patient.post(`/api/appointments/${appointmentId}/reschedule`).send({ slotId: 102 })
+    expect(response.status).toBe(expectedStatus)
+    if (expectedStatus === 409) {
+      expect(context.appointments).toHaveLength(1)
+      expect(context.appointments[0].status).toBe('booked')
+    }
+  })
+
+  it('blocks Patient cancel/reschedule and Doctor cancellation once consultation begins', async () => {
+    await openAndBegin()
+    expect((await patient.post(`/api/appointments/${appointmentId}/cancel`).send({})).status).toBe(409)
+    expect((await patient.post(`/api/appointments/${appointmentId}/reschedule`).send({ slotId: 102 })).status).toBe(409)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/cancel`).send({ reason: 'Emergency' })).status).toBe(409)
+  })
+
+  it.each([
+    ['before T', -1],
+    ['after T', 1],
+    ['after T+15', 16],
+    ['after slot end', 31],
+  ])('allows assigned Doctor cancellation %s while the booking is unresolved', async (_label, minutes) => {
+    atMinutesFromStart(minutes)
+    const detail = await doctor.get(`/api/appointments/${appointmentId}`)
+    expect(detail.body.appointment.consultationFlow.canCancel).toBe(true)
+    const response = await doctor.post(`/api/appointments/${appointmentId}/cancel`).send({ reason: 'Emergency' })
+    expect(response.status).toBe(200)
+    expect(response.body.appointment.status).toBe('cancelled')
+  })
+
+  it('forbids the wrong Doctor from cancelling an unresolved booking', async () => {
+    atMinutesFromStart(31)
+    const response = await otherDoctor.post(`/api/appointments/${appointmentId}/cancel`).send({ reason: 'Emergency' })
+    expect(response.status).toBe(403)
+    expect(context.appointments[0].status).toBe('booked')
+  })
+
+  it('rejects Finish without a Consultation', async () => {
+    atMinutesFromStart(-5)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/consultation/finish`).send({})).status).toBe(409)
+  })
+
+  it('forbids the wrong doctor from finishing a Consultation', async () => {
+    await openAndBegin()
+    expect((await otherDoctor.post(`/api/appointments/${appointmentId}/consultation/finish`).send({})).status).toBe(403)
+  })
+
+  it('atomically finishes the active Consultation and is idempotent', async () => {
+    await openAndBegin()
+    currentTime = new Date(endAt.getTime() + 60 * 60 * 1000)
+    const first = await doctor.post(`/api/appointments/${appointmentId}/consultation/finish`).send({})
+    const repeated = await doctor.post(`/api/appointments/${appointmentId}/consultation/finish`).send({})
+    expect(first.status).toBe(200)
+    expect(first.body.appointment.status).toBe('completed')
+    expect(first.body.appointment.consultationFlow.consultationFinishedAt).toBe(currentTime.toISOString())
+    expect(repeated.status).toBe(200)
+    expect(repeated.body.appointment.consultationFlow.consultationFinishedAt).toBe(first.body.appointment.consultationFlow.consultationFinishedAt)
+    expect((await doctor.post(`/api/appointments/${appointmentId}/no-show`)).status).toBe(409)
+    expect((await patient.post(`/api/appointments/${appointmentId}/cancel`).send({})).status).toBe(409)
+    expect((await patient.post(`/api/appointments/${appointmentId}/reschedule`).send({ slotId: 102 })).status).toBe(409)
+    const history = await patient.get('/api/appointments/me')
+    expect(history.body.history.some(item => item.id === appointmentId && item.status === 'completed')).toBe(true)
+  })
+
+  it.each(['completed', 'no_show', 'cancelled', 'rescheduled'])('prevents Doctor cancellation of a %s appointment', async status => {
+    context.appointments[0].status = status
+    atMinutesFromStart(-1)
+    const response = await doctor.post(`/api/appointments/${appointmentId}/cancel`).send({ reason: 'Emergency' })
+    expect(response.status).toBe(409)
+  })
+
+  it('exposes role-derived flow data in detail and Doctor list responses', async () => {
+    atMinutesFromStart(-5)
+    await patient.post(`/api/appointments/${appointmentId}/ready`)
+    await doctor.post(`/api/appointments/${appointmentId}/open-room`)
+    const patientDetail = await patient.get(`/api/appointments/${appointmentId}`)
+    const doctorDetail = await doctor.get(`/api/appointments/${appointmentId}`)
+    const doctorList = await doctor.get('/api/doctors/me/appointments')
+    expect(patientDetail.body.appointment.consultationFlow).toMatchObject({
+      readyAt: expect.any(String),
+      roomOpenedAt: expect.any(String),
+      canMarkReady: true,
+      canOpenRoom: false,
+    })
+    expect(doctorDetail.body.appointment.consultationFlow).toMatchObject({
+      canMarkReady: false,
+      canOpenRoom: true,
+      canBeginConsultation: true,
+      checkInOpensAt: expect.any(String),
+      noShowAvailableAt: expect.any(String),
+    })
+    expect(doctorList.body.upcoming[0]).toMatchObject({
+      patient: { id: 1, fullName: 'Ananya Rao' },
+      consultationFlow: {
+        readyAt: expect.any(String),
+        roomOpenedAt: expect.any(String),
+        consultationId: null,
+      },
+    })
+  })
+
+  it('requires authentication for every lifecycle action', async () => {
+    const responses = await Promise.all(
+      ['ready', 'open-room', 'begin-consultation', 'no-show', 'consultation/finish']
+        .map(action => request(app).post(`/api/appointments/${appointmentId}/${action}`).send({})),
+    )
+    expect(responses.map(response => response.status)).toEqual([401, 401, 401, 401, 401])
+  })
+
+  it('enforces clinical roles with no Patient or Admin bypass', async () => {
+    atMinutesFromStart(-5)
+    const doctorActions = ['open-room', 'begin-consultation', 'no-show', 'consultation/finish']
+    const responses = await Promise.all([
+      ...doctorActions.map(action => patient.post(`/api/appointments/${appointmentId}/${action}`).send({})),
+      ...doctorActions.map(action => admin.post(`/api/appointments/${appointmentId}/${action}`).send({})),
+      doctor.post(`/api/appointments/${appointmentId}/ready`).send({}),
+      admin.post(`/api/appointments/${appointmentId}/ready`).send({}),
+    ])
+    expect(responses.every(response => response.status === 403)).toBe(true)
+  })
+
+  it('returns 404 for a missing appointment after valid role authorization', async () => {
+    atMinutesFromStart(-5)
+    expect((await patient.post('/api/appointments/999999/ready').send({})).status).toBe(404)
+    expect((await doctor.post('/api/appointments/999999/open-room').send({})).status).toBe(404)
+  })
+})

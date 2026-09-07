@@ -3,12 +3,25 @@ import {
   appointmentRepository,
 } from '../data-access/appointment.repository.js'
 import { AppError } from '../errors/app-error.js'
+import { consultationTimes, isConsultationEditable, isWithin } from './consultation-lifecycle.js'
 
 function optionalNumber(value) {
   return value === null || value === undefined ? null : Number(value)
 }
 
-function mapAppointment(row) {
+function mapAppointment(row, user, now = new Date()) {
+  const consultation = row.consultation_id ? {
+    id: Number(row.consultation_id),
+    startedAt: row.consultation_started_at,
+    finishedAt: row.consultation_finished_at,
+  } : null
+  const times = consultationTimes(row.start_at, row.end_at)
+  const instant = new Date(now).getTime()
+  const isOwner = user?.role === 'patient' && Number(row.patient_id) === user.id
+  const isAssignedDoctor = user?.role === 'doctor' && Number(row.doctor_id) === user.id
+  const isBooked = row.status === 'booked'
+  const hasConsultation = Boolean(consultation)
+  const beforeNoShowCutoff = instant < times.noShowAvailableAt.getTime()
   return {
     id: Number(row.id),
     status: row.status,
@@ -37,15 +50,35 @@ function mapAppointment(row) {
       reason: row.cancellation_reason,
       cancelledAt: row.cancelled_at,
     } : null,
+    consultationFlow: {
+      readyAt: row.ready_at ?? null,
+      roomOpenedAt: row.room_opened_at ?? null,
+      consultationId: consultation?.id ?? null,
+      consultationStartedAt: consultation?.startedAt ?? null,
+      consultationFinishedAt: consultation?.finishedAt ?? null,
+      checkInOpensAt: times.checkInOpensAt.toISOString(),
+      doctorRoomOpensAt: times.doctorRoomOpensAt.toISOString(),
+      noShowAvailableAt: times.noShowAvailableAt.toISOString(),
+      startCutoffAt: times.startCutoffAt.toISOString(),
+      canMarkReady: isOwner && isBooked && !hasConsultation && isWithin(now, times.checkInOpensAt, times.startCutoffAt),
+      canOpenRoom: isAssignedDoctor && isBooked && !hasConsultation && isWithin(now, times.doctorRoomOpensAt, times.startCutoffAt),
+      canBeginConsultation: isAssignedDoctor && isBooked && !hasConsultation && Boolean(row.room_opened_at) && isWithin(now, times.doctorRoomOpensAt, times.startCutoffAt),
+      canMarkNoShow: isAssignedDoctor && isBooked && !hasConsultation && instant >= times.noShowAvailableAt.getTime(),
+      canCancel: isBooked && !hasConsultation && (isAssignedDoctor || (isOwner && beforeNoShowCutoff)),
+      canReschedule: isOwner && isBooked && !hasConsultation && beforeNoShowCutoff,
+      isClinicalWorkspaceEditable: isConsultationEditable(consultation && {
+        finished_at: consultation.finishedAt,
+      }),
+    },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
 }
 
-function groupedAppointments(rows) {
-  const appointments = rows.map(mapAppointment)
+function groupedAppointments(rows, user, now) {
+  const appointments = rows.map(row => mapAppointment(row, user, now))
   const upcoming = appointments
-    .filter(item => item.status === 'booked' && new Date(item.slot.startAt) > new Date())
+    .filter(item => item.status === 'booked' && new Date(item.slot.startAt) > new Date(now))
     .sort((left, right) => new Date(left.slot.startAt) - new Date(right.slot.startAt))
   const history = appointments
     .filter(item => !upcoming.includes(item))
@@ -63,6 +96,11 @@ function translateDataError(error) {
     APPOINTMENT_ACCESS_DENIED: [403, 'APPOINTMENT_ACCESS_DENIED', 'You cannot access this appointment'],
     APPOINTMENT_NOT_CANCELLABLE: [409, 'APPOINTMENT_NOT_CANCELLABLE', 'This appointment can no longer be cancelled'],
     APPOINTMENT_NOT_RESCHEDULABLE: [409, 'APPOINTMENT_NOT_RESCHEDULABLE', 'This appointment can no longer be rescheduled'],
+    APPOINTMENT_NOT_READYABLE: [409, 'APPOINTMENT_NOT_READYABLE', 'Check-in is not available for this appointment'],
+    ROOM_NOT_OPENABLE: [409, 'ROOM_NOT_OPENABLE', 'The consultation room cannot be opened at this time'],
+    CONSULTATION_NOT_BEGINNABLE: [409, 'CONSULTATION_NOT_BEGINNABLE', 'The consultation cannot be started at this time'],
+    APPOINTMENT_NOT_NO_SHOWABLE: [409, 'APPOINTMENT_NOT_NO_SHOWABLE', 'This appointment cannot be marked as a no-show'],
+    CONSULTATION_NOT_FINISHABLE: [409, 'CONSULTATION_NOT_FINISHABLE', 'The consultation cannot be finished'],
     SAME_SLOT: [400, 'SAME_SLOT', 'Choose a different slot to reschedule'],
   }
   const [status, code, message] = errors[error.code] ?? []
@@ -70,7 +108,7 @@ function translateDataError(error) {
   throw new AppError(status, code, message)
 }
 
-export function createAppointmentService(repository = appointmentRepository) {
+export function createAppointmentService(repository = appointmentRepository, clock = () => new Date()) {
   return {
     async book(patient, slotId) {
       try {
@@ -79,18 +117,20 @@ export function createAppointmentService(repository = appointmentRepository) {
           patientName: patient.fullName,
           slotId,
         })
-        return mapAppointment(row)
+        return mapAppointment(row, patient, clock())
       } catch (error) {
         translateDataError(error)
       }
     },
 
     async listForPatient(patientId) {
-      return groupedAppointments(await repository.listForPatient(patientId))
+      const now = clock()
+      return groupedAppointments(await repository.listForPatient(patientId), { id: patientId, role: 'patient' }, now)
     },
 
     async listForDoctor(doctorId) {
-      return groupedAppointments(await repository.listForDoctor(doctorId))
+      const now = clock()
+      return groupedAppointments(await repository.listForDoctor(doctorId), { id: doctorId, role: 'doctor' }, now)
     },
 
     async getById(appointmentId, user) {
@@ -103,7 +143,7 @@ export function createAppointmentService(repository = appointmentRepository) {
         throw new AppError(403, 'APPOINTMENT_ACCESS_DENIED', 'You cannot access this appointment')
       }
 
-      return mapAppointment(row)
+      return mapAppointment(row, user, clock())
     },
 
     async cancel(appointmentId, user, reason) {
@@ -117,17 +157,58 @@ export function createAppointmentService(repository = appointmentRepository) {
           actorId: user.id,
           actorRole: user.role,
           reason,
+          now: clock(),
         })
-        return mapAppointment(row)
+        return mapAppointment(row, user, clock())
       } catch (error) {
         translateDataError(error)
       }
     },
 
-    async reschedule(appointmentId, patientId, slotId) {
+    async reschedule(appointmentId, patient, slotId) {
       try {
-        const row = await repository.reschedule({ appointmentId, patientId, slotId })
-        return mapAppointment(row)
+        const row = await repository.reschedule({ appointmentId, patientId: patient.id, slotId, now: clock() })
+        return mapAppointment(row, patient, clock())
+      } catch (error) {
+        translateDataError(error)
+      }
+    },
+
+    async markReady(appointmentId, patient) {
+      try {
+        return mapAppointment(await repository.markReady({ appointmentId, patientId: patient.id, now: clock() }), patient, clock())
+      } catch (error) {
+        translateDataError(error)
+      }
+    },
+
+    async openRoom(appointmentId, doctor) {
+      try {
+        return mapAppointment(await repository.openRoom({ appointmentId, doctorId: doctor.id, now: clock() }), doctor, clock())
+      } catch (error) {
+        translateDataError(error)
+      }
+    },
+
+    async beginConsultation(appointmentId, doctor) {
+      try {
+        return mapAppointment(await repository.beginConsultation({ appointmentId, doctorId: doctor.id, now: clock() }), doctor, clock())
+      } catch (error) {
+        translateDataError(error)
+      }
+    },
+
+    async markNoShow(appointmentId, doctor) {
+      try {
+        return mapAppointment(await repository.markNoShow({ appointmentId, doctorId: doctor.id, now: clock() }), doctor, clock())
+      } catch (error) {
+        translateDataError(error)
+      }
+    },
+
+    async finishConsultation(appointmentId, doctor) {
+      try {
+        return mapAppointment(await repository.finishConsultation({ appointmentId, doctorId: doctor.id, now: clock() }), doctor, clock())
       } catch (error) {
         translateDataError(error)
       }

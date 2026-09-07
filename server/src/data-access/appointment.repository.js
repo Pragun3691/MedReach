@@ -20,7 +20,11 @@ const appointmentSelect = `
     a.cancellation_reason,
     a.cancelled_at,
     a.ready_at,
+    a.room_opened_at,
     a.no_show_marked_at,
+    consultation.id AS consultation_id,
+    consultation.started_at AS consultation_started_at,
+    consultation.finished_at AS consultation_finished_at,
     a.created_at,
     a.updated_at,
     patient_user.full_name AS patient_name,
@@ -52,6 +56,7 @@ const appointmentSelect = `
   JOIN availability_blocks ab ON ab.id = s.availability_block_id
   JOIN doctor_profiles doctor ON doctor.user_id = ab.doctor_id
   JOIN users doctor_user ON doctor_user.id = doctor.user_id
+  LEFT JOIN consultations consultation ON consultation.appointment_id = a.id
 `
 
 async function withTransaction(databaseProvider, work) {
@@ -128,6 +133,7 @@ async function lockAppointment(client, appointmentId) {
     `SELECT
        a.*,
        s.start_at,
+       s.end_at,
        s.is_active AS slot_is_active,
        s.start_at > current_timestamp AS is_future,
        ab.doctor_id,
@@ -147,6 +153,17 @@ async function lockAppointment(client, appointmentId) {
   return result.rows[0] ?? null
 }
 
+async function lockConsultation(client, appointmentId) {
+  const result = await client.query(
+    `SELECT id, appointment_id, started_at, finished_at, created_at, updated_at
+     FROM consultations
+     WHERE appointment_id = $1
+     FOR UPDATE`,
+    [appointmentId],
+  )
+  return result.rows[0] ?? null
+}
+
 async function findAppointment(client, appointmentId) {
   const result = await client.query(
     `${appointmentSelect}
@@ -162,6 +179,27 @@ async function createNotification(client, recipientUserId, type, message, appoin
      VALUES ($1, $2, $3, $4)`,
     [recipientUserId, type, message, `/appointments/${appointmentId}`],
   )
+}
+
+function noShowMessage(appointment) {
+  const formatter = new Intl.DateTimeFormat('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Kolkata',
+  })
+  const parts = Object.fromEntries(formatter.formatToParts(new Date(appointment.start_at)).map(part => [part.type, part.value]))
+  return `You were marked as not attending your consultation with ${appointment.doctor_name} on ${parts.day} ${parts.month} at ${parts.hour}:${parts.minute} ${parts.dayPeriod.toUpperCase()}.`
+}
+
+function before(value, boundary) {
+  return new Date(value).getTime() < new Date(boundary).getTime()
+}
+
+function atOrAfter(value, boundary) {
+  return new Date(value).getTime() >= new Date(boundary).getTime()
 }
 
 export function createAppointmentRepository(databaseProvider = getPool) {
@@ -219,7 +257,7 @@ export function createAppointmentRepository(databaseProvider = getPool) {
     return findAppointment(databaseProvider(), appointmentId)
   },
 
-  async cancel({ appointmentId, actorId, actorRole, reason }) {
+  async cancel({ appointmentId, actorId, actorRole, reason, now = new Date() }) {
     return withTransaction(databaseProvider, async client => {
       const appointment = await lockAppointment(client, appointmentId)
       if (!appointment) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
@@ -229,7 +267,10 @@ export function createAppointmentRepository(databaseProvider = getPool) {
       if (!ownsAppointment && !isAssignedDoctor) {
         throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
       }
-      if (appointment.status !== 'booked' || !appointment.is_future) {
+      const consultation = await lockConsultation(client, appointmentId)
+      const patientCutoff = new Date(new Date(appointment.start_at).getTime() + 15 * 60 * 1000)
+      const withinActorWindow = actorRole === 'doctor' || before(now, patientCutoff)
+      if (appointment.status !== 'booked' || consultation || !withinActorWindow) {
         throw new AppointmentDataError('APPOINTMENT_NOT_CANCELLABLE')
       }
 
@@ -267,14 +308,16 @@ export function createAppointmentRepository(databaseProvider = getPool) {
     })
   },
 
-  async reschedule({ appointmentId, patientId, slotId }) {
+  async reschedule({ appointmentId, patientId, slotId, now = new Date() }) {
     return withTransaction(databaseProvider, async client => {
       const original = await lockAppointment(client, appointmentId)
       if (!original) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
       if (Number(original.patient_id) !== patientId) {
         throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
       }
-      if (original.status !== 'booked' || !original.is_future) {
+      const consultation = await lockConsultation(client, appointmentId)
+      const cutoff = new Date(new Date(original.start_at).getTime() + 15 * 60 * 1000)
+      if (original.status !== 'booked' || consultation || !before(now, cutoff)) {
         throw new AppointmentDataError('APPOINTMENT_NOT_RESCHEDULABLE')
       }
       if (Number(original.slot_id) === slotId) {
@@ -324,6 +367,132 @@ export function createAppointmentRepository(databaseProvider = getPool) {
       }
 
       return findAppointment(client, newAppointmentId)
+    })
+  },
+
+  async markReady({ appointmentId, patientId, now }) {
+    return withTransaction(databaseProvider, async client => {
+      const appointment = await lockAppointment(client, appointmentId)
+      if (!appointment) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
+      if (Number(appointment.patient_id) !== patientId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      const consultation = await lockConsultation(client, appointmentId)
+      const opensAt = new Date(new Date(appointment.start_at).getTime() - 15 * 60 * 1000)
+      if (
+        appointment.status !== 'booked'
+        || consultation
+        || !atOrAfter(now, opensAt)
+        || !before(now, appointment.end_at)
+      ) throw new AppointmentDataError('APPOINTMENT_NOT_READYABLE')
+
+      await client.query(
+        `UPDATE appointments
+         SET ready_at = COALESCE(ready_at, $2), updated_at = current_timestamp
+         WHERE id = $1`,
+        [appointmentId, now],
+      )
+      return findAppointment(client, appointmentId)
+    })
+  },
+
+  async openRoom({ appointmentId, doctorId, now }) {
+    return withTransaction(databaseProvider, async client => {
+      const appointment = await lockAppointment(client, appointmentId)
+      if (!appointment) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
+      if (Number(appointment.doctor_id) !== doctorId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      const consultation = await lockConsultation(client, appointmentId)
+      const opensAt = new Date(new Date(appointment.start_at).getTime() - 5 * 60 * 1000)
+      if (
+        appointment.status !== 'booked'
+        || consultation
+        || !atOrAfter(now, opensAt)
+        || !before(now, appointment.end_at)
+      ) throw new AppointmentDataError('ROOM_NOT_OPENABLE')
+
+      await client.query(
+        `UPDATE appointments
+         SET room_opened_at = COALESCE(room_opened_at, $2), updated_at = current_timestamp
+         WHERE id = $1`,
+        [appointmentId, now],
+      )
+      return findAppointment(client, appointmentId)
+    })
+  },
+
+  async beginConsultation({ appointmentId, doctorId, now }) {
+    return withTransaction(databaseProvider, async client => {
+      const appointment = await lockAppointment(client, appointmentId)
+      if (!appointment) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
+      if (Number(appointment.doctor_id) !== doctorId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      const consultation = await lockConsultation(client, appointmentId)
+      if (appointment.status === 'booked' && consultation?.finished_at == null && consultation) {
+        return findAppointment(client, appointmentId)
+      }
+      const opensAt = new Date(new Date(appointment.start_at).getTime() - 5 * 60 * 1000)
+      if (
+        appointment.status !== 'booked'
+        || consultation
+        || !appointment.room_opened_at
+        || !atOrAfter(now, opensAt)
+        || !before(now, appointment.end_at)
+      ) throw new AppointmentDataError('CONSULTATION_NOT_BEGINNABLE')
+
+      await client.query(
+        `INSERT INTO consultations (appointment_id, started_at)
+         VALUES ($1, $2)`,
+        [appointmentId, now],
+      )
+      return findAppointment(client, appointmentId)
+    })
+  },
+
+  async markNoShow({ appointmentId, doctorId, now }) {
+    return withTransaction(databaseProvider, async client => {
+      const appointment = await lockAppointment(client, appointmentId)
+      if (!appointment) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
+      if (Number(appointment.doctor_id) !== doctorId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      const consultation = await lockConsultation(client, appointmentId)
+      const availableAt = new Date(new Date(appointment.start_at).getTime() + 15 * 60 * 1000)
+      if (appointment.status !== 'booked' || consultation || !atOrAfter(now, availableAt)) {
+        throw new AppointmentDataError('APPOINTMENT_NOT_NO_SHOWABLE')
+      }
+
+      await client.query(
+        `UPDATE appointments
+         SET status = 'no_show', no_show_marked_at = $2, updated_at = current_timestamp
+         WHERE id = $1`,
+        [appointmentId, now],
+      )
+      await createNotification(client, appointment.patient_id, 'appointment_no_show', noShowMessage(appointment), appointmentId)
+      return findAppointment(client, appointmentId)
+    })
+  },
+
+  async finishConsultation({ appointmentId, doctorId, now }) {
+    return withTransaction(databaseProvider, async client => {
+      const appointment = await lockAppointment(client, appointmentId)
+      if (!appointment) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
+      if (Number(appointment.doctor_id) !== doctorId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      const consultation = await lockConsultation(client, appointmentId)
+      if (appointment.status === 'completed' && consultation?.finished_at) {
+        return findAppointment(client, appointmentId)
+      }
+      if (appointment.status !== 'booked' || !consultation || consultation.finished_at) {
+        throw new AppointmentDataError('CONSULTATION_NOT_FINISHABLE')
+      }
+
+      await client.query(
+        `UPDATE consultations
+         SET finished_at = $2, updated_at = current_timestamp
+         WHERE appointment_id = $1`,
+        [appointmentId, now],
+      )
+      await client.query(
+        `UPDATE appointments
+         SET status = 'completed', updated_at = current_timestamp
+         WHERE id = $1`,
+        [appointmentId],
+      )
+      return findAppointment(client, appointmentId)
     })
   },
   }

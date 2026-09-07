@@ -14,7 +14,7 @@ function indiaDate(value) {
   }).format(new Date(value))
 }
 
-export function createBookingTestContext() {
+export function createBookingTestContext({ clock = () => new Date() } = {}) {
   const users = [
     { id: 1, fullName: 'Ananya Rao', email: 'patient@example.test', role: 'patient', isEnabled: true },
     { id: 2, fullName: 'Rohan Das', email: 'other-patient@example.test', role: 'patient', isEnabled: true },
@@ -41,6 +41,7 @@ export function createBookingTestContext() {
   ].map(slot => ({ ...slot, endAt: new Date(new Date(slot.startAt).getTime() + 30 * 60 * 1000).toISOString() }))
   const appointments = []
   const notifications = []
+  const consultations = []
   let nextAppointmentId = 1000
   let nextNotificationId = 5000
 
@@ -84,6 +85,7 @@ export function createBookingTestContext() {
     const doctor = userById(slot.doctorId)
     const patient = userById(appointment.patientId)
     const replacement = appointments.find(item => item.rescheduledFromId === appointment.id)
+    const consultation = consultations.find(item => item.appointmentId === appointment.id)
 
     return {
       id: appointment.id,
@@ -95,6 +97,12 @@ export function createBookingTestContext() {
       cancelled_by_user_id: appointment.cancelledByUserId ?? null,
       cancellation_reason: appointment.cancellationReason ?? null,
       cancelled_at: appointment.cancelledAt ?? null,
+      ready_at: appointment.readyAt ?? null,
+      room_opened_at: appointment.roomOpenedAt ?? null,
+      no_show_marked_at: appointment.noShowMarkedAt ?? null,
+      consultation_id: consultation?.id ?? null,
+      consultation_started_at: consultation?.startedAt ?? null,
+      consultation_finished_at: consultation?.finishedAt ?? null,
       created_at: appointment.createdAt,
       updated_at: appointment.updatedAt,
       patient_name: patient.fullName,
@@ -119,6 +127,9 @@ export function createBookingTestContext() {
       feeSnapshot: slot.effectiveFee ?? doctor.defaultFee,
       createdAt: timestamp,
       updatedAt: timestamp,
+      readyAt: null,
+      roomOpenedAt: null,
+      noShowMarkedAt: null,
     }
     appointments.push(appointment)
     return appointment
@@ -148,14 +159,17 @@ export function createBookingTestContext() {
       return appointment ? rowFor(appointment) : null
     },
 
-    async cancel({ appointmentId, actorId, actorRole, reason }) {
+    async cancel({ appointmentId, actorId, actorRole, reason, now = new Date() }) {
       const appointment = appointments.find(item => item.id === Number(appointmentId))
       if (!appointment) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
       const slot = slotById(appointment.slotId)
       const owns = actorRole === 'patient' && appointment.patientId === actorId
       const assigned = actorRole === 'doctor' && slot.doctorId === actorId
       if (!owns && !assigned) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
-      if (appointment.status !== 'booked' || new Date(slot.startAt) <= new Date()) {
+      const consultation = consultations.find(item => item.appointmentId === appointment.id)
+      const patientCutoff = new Date(new Date(slot.startAt).getTime() + 15 * 60 * 1000)
+      const withinActorWindow = actorRole === 'doctor' || new Date(now) < patientCutoff
+      if (appointment.status !== 'booked' || consultation || !withinActorWindow) {
         throw new AppointmentDataError('APPOINTMENT_NOT_CANCELLABLE')
       }
 
@@ -173,11 +187,13 @@ export function createBookingTestContext() {
       return rowFor(appointment)
     },
 
-    async reschedule({ appointmentId, patientId, slotId }) {
+    async reschedule({ appointmentId, patientId, slotId, now = new Date() }) {
       const original = appointments.find(item => item.id === Number(appointmentId))
       if (!original) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
       if (original.patientId !== patientId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
-      if (original.status !== 'booked' || new Date(slotById(original.slotId).startAt) <= new Date()) {
+      const originalStart = new Date(slotById(original.slotId).startAt)
+      const cutoff = new Date(originalStart.getTime() + 15 * 60 * 1000)
+      if (original.status !== 'booked' || consultations.some(item => item.appointmentId === original.id) || new Date(now) >= cutoff) {
         throw new AppointmentDataError('APPOINTMENT_NOT_RESCHEDULABLE')
       }
       if (original.slotId === slotId) throw new AppointmentDataError('SAME_SLOT')
@@ -191,6 +207,79 @@ export function createBookingTestContext() {
       addNotification(patientId, 'appointment_rescheduled', `Your appointment was rescheduled with ${userById(newSlot.doctorId).fullName}.`, replacement.id)
       addNotification(slotById(original.slotId).doctorId, 'appointment_rescheduled', `${userById(patientId).fullName} rescheduled their appointment.`, original.id)
       return rowFor(replacement)
+    },
+
+    async markReady({ appointmentId, patientId, now }) {
+      const appointment = appointments.find(item => item.id === Number(appointmentId))
+      if (!appointment) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
+      if (appointment.patientId !== patientId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      const slot = slotById(appointment.slotId)
+      const opensAt = new Date(new Date(slot.startAt).getTime() - 15 * 60 * 1000)
+      if (appointment.status !== 'booked' || consultations.some(item => item.appointmentId === appointment.id) || new Date(now) < opensAt || new Date(now) >= new Date(slot.endAt)) {
+        throw new AppointmentDataError('APPOINTMENT_NOT_READYABLE')
+      }
+      appointment.readyAt ??= new Date(now).toISOString()
+      appointment.updatedAt = new Date(now).toISOString()
+      return rowFor(appointment)
+    },
+
+    async openRoom({ appointmentId, doctorId, now }) {
+      const appointment = appointments.find(item => item.id === Number(appointmentId))
+      if (!appointment) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
+      const slot = slotById(appointment.slotId)
+      if (slot.doctorId !== doctorId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      const opensAt = new Date(new Date(slot.startAt).getTime() - 5 * 60 * 1000)
+      if (appointment.status !== 'booked' || consultations.some(item => item.appointmentId === appointment.id) || new Date(now) < opensAt || new Date(now) >= new Date(slot.endAt)) {
+        throw new AppointmentDataError('ROOM_NOT_OPENABLE')
+      }
+      appointment.roomOpenedAt ??= new Date(now).toISOString()
+      appointment.updatedAt = new Date(now).toISOString()
+      return rowFor(appointment)
+    },
+
+    async beginConsultation({ appointmentId, doctorId, now }) {
+      const appointment = appointments.find(item => item.id === Number(appointmentId))
+      if (!appointment) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
+      const slot = slotById(appointment.slotId)
+      if (slot.doctorId !== doctorId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      const existing = consultations.find(item => item.appointmentId === appointment.id)
+      if (appointment.status === 'booked' && existing && !existing.finishedAt) return rowFor(appointment)
+      const opensAt = new Date(new Date(slot.startAt).getTime() - 5 * 60 * 1000)
+      if (appointment.status !== 'booked' || existing || !appointment.roomOpenedAt || new Date(now) < opensAt || new Date(now) >= new Date(slot.endAt)) {
+        throw new AppointmentDataError('CONSULTATION_NOT_BEGINNABLE')
+      }
+      consultations.push({ id: 9000 + consultations.length, appointmentId: appointment.id, startedAt: new Date(now).toISOString(), finishedAt: null })
+      return rowFor(appointment)
+    },
+
+    async markNoShow({ appointmentId, doctorId, now }) {
+      const appointment = appointments.find(item => item.id === Number(appointmentId))
+      if (!appointment) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
+      const slot = slotById(appointment.slotId)
+      if (slot.doctorId !== doctorId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      const availableAt = new Date(new Date(slot.startAt).getTime() + 15 * 60 * 1000)
+      if (appointment.status !== 'booked' || consultations.some(item => item.appointmentId === appointment.id) || new Date(now) < availableAt) {
+        throw new AppointmentDataError('APPOINTMENT_NOT_NO_SHOWABLE')
+      }
+      appointment.status = 'no_show'
+      appointment.noShowMarkedAt = new Date(now).toISOString()
+      appointment.updatedAt = appointment.noShowMarkedAt
+      addNotification(appointment.patientId, 'appointment_no_show', `You were marked as not attending your consultation with ${userById(slot.doctorId).fullName} on ${new Date(slot.startAt).toISOString()}.`, appointment.id)
+      return rowFor(appointment)
+    },
+
+    async finishConsultation({ appointmentId, doctorId, now }) {
+      const appointment = appointments.find(item => item.id === Number(appointmentId))
+      if (!appointment) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
+      const slot = slotById(appointment.slotId)
+      if (slot.doctorId !== doctorId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      const consultation = consultations.find(item => item.appointmentId === appointment.id)
+      if (appointment.status === 'completed' && consultation?.finishedAt) return rowFor(appointment)
+      if (appointment.status !== 'booked' || !consultation || consultation.finishedAt) throw new AppointmentDataError('CONSULTATION_NOT_FINISHABLE')
+      consultation.finishedAt = new Date(now).toISOString()
+      appointment.status = 'completed'
+      appointment.updatedAt = consultation.finishedAt
+      return rowFor(appointment)
     },
   }
 
@@ -268,10 +357,11 @@ export function createBookingTestContext() {
     slots,
     appointments,
     notifications,
+    consultations,
     repository,
     services: {
       auth,
-      appointments: createAppointmentService(repository),
+      appointments: createAppointmentService(repository, clock),
       notifications: createNotificationService(notificationRepository),
       doctors: publicDoctors,
     },

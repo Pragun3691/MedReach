@@ -11,6 +11,11 @@ export function createAppointmentRouter(service, authenticate) {
   router.get('/:appointmentId', authenticate, authorizeRoles('patient', 'doctor'), controller.getById)
   router.post('/:appointmentId/cancel', authenticate, authorizeRoles('patient', 'doctor'), controller.cancel)
   router.post('/:appointmentId/reschedule', authenticate, authorizeRoles('patient'), controller.reschedule)
+  router.post('/:appointmentId/ready', authenticate, authorizeRoles('patient'), controller.markReady)
+  router.post('/:appointmentId/open-room', authenticate, authorizeRoles('doctor'), controller.openRoom)
+  router.post('/:appointmentId/begin-consultation', authenticate, authorizeRoles('doctor'), controller.beginConsultation)
+  router.post('/:appointmentId/no-show', authenticate, authorizeRoles('doctor'), controller.markNoShow)
+  router.post('/:appointmentId/consultation/finish', authenticate, authorizeRoles('doctor'), controller.finishConsultation)
 
   return router
 }
