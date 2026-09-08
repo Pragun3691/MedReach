@@ -1356,6 +1356,8 @@ select {
 .consultation-room-status { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px solid rgba(15, 39, 71, 0.1); background: #e4ece7; padding: 0.65rem 1.25rem; color: #355c51; font-size: 0.78rem; }
 .consultation-room-frame { min-width: 0; min-height: 22rem; background: #102435; }
 .consultation-room-frame iframe { display: block; width: 100% !important; height: 100% !important; border: 0; }
+.active-consultation-layout { display: grid; min-width: 0; min-height: 0; grid-template-columns: minmax(0, 1.7fr) minmax(21rem, 1fr); overflow: hidden; }
+.active-consultation-layout--video-only { grid-template-columns: minmax(0, 1fr); }
 .consultation-room-footer { display: flex; align-items: center; justify-content: space-between; gap: 1.25rem; border-top: 1px solid rgba(15, 39, 71, 0.14); padding: 0.8rem 1.25rem; }
 .consultation-room-footer div { display: grid; gap: 0.2rem; }
 .consultation-room-footer strong { font-size: 0.84rem; }
@@ -1366,6 +1368,38 @@ select {
 .appointment-detail-history > div,
 .appointment-detail-history > p:not(.appointment-detail-eyebrow) { margin-top: 1rem; color: #596965; font-size: 0.86rem; line-height: 1.65; }
 .appointment-detail-history a { color: #174e43; font-weight: 700; text-underline-offset: 0.2rem; }
+.appointment-clinical-record { grid-column: 1 / -1; margin-top: 2.5rem; }
+.clinical-loading { margin-top: 2rem; color: #536863; font-size: 0.85rem; }
+.clinical-workspace { display: flex; min-width: 0; min-height: 0; flex-direction: column; border: 1px solid rgba(15, 39, 71, 0.16); background: #fffdf9; color: #0f2747; }
+.active-consultation-layout > .clinical-workspace { overflow: hidden; border-width: 0 0 0 1px; }
+.clinical-workspace__header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid rgba(15, 39, 71, 0.13); padding: 1rem 1.15rem; background: #f2eee5; }
+.clinical-workspace__header p, .clinical-section__eyebrow { color: #2c7a68; font-size: 0.65rem; font-weight: 760; letter-spacing: 0.13em; text-transform: uppercase; }
+.clinical-workspace__header h2 { margin-top: 0.18rem; font-size: 1.3rem; font-weight: 650; letter-spacing: -0.03em; }
+.clinical-workspace__header > span { border: 1px solid rgba(15, 39, 71, 0.2); border-radius: 999px; padding: 0.3rem 0.58rem; color: #5e6c67; font-size: 0.68rem; font-weight: 700; }
+.clinical-workspace__body { display: grid; gap: 0; overflow-y: auto; }
+.clinical-section { padding: 1.1rem 1.15rem 1.25rem; }
+.clinical-section + .clinical-section { border-top: 1px solid rgba(15, 39, 71, 0.12); }
+.clinical-section > label:not(.follow-up-toggle), .prescription-item label { display: grid; gap: 0.35rem; margin-top: 0.65rem; color: #334b5a; font-size: 0.74rem; font-weight: 700; }
+.clinical-section textarea, .clinical-section input, .clinical-section select { width: 100%; min-width: 0; border: 1px solid rgba(15, 39, 71, 0.24); border-radius: 0.35rem; background: white; padding: 0.62rem 0.68rem; color: #162d43; font: inherit; font-size: 0.8rem; }
+.clinical-section textarea { resize: vertical; line-height: 1.55; }
+.clinical-section textarea:focus, .clinical-section input:focus, .clinical-section select:focus { border-color: #2c7a68; outline: 2px solid rgba(44, 122, 104, 0.17); }
+.clinical-section :disabled { background: #f1efe9; color: #596965; opacity: 1; }
+.clinical-section__heading { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
+.clinical-section__heading h3 { margin-top: 0.18rem; font-size: 1rem; font-weight: 650; }
+.clinical-section__heading button, .prescription-item__remove { color: #174e43; font-size: 0.75rem; font-weight: 720; text-decoration: underline; text-underline-offset: 0.2rem; }
+.clinical-empty { margin-top: 0.8rem; color: #75817d; font-size: 0.78rem; }
+.prescription-list { display: grid; gap: 0.85rem; margin-top: 0.8rem; }
+.prescription-item { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.2rem 0.7rem; border: 1px solid rgba(15, 39, 71, 0.13); padding: 0.8rem; }
+.prescription-item legend { padding: 0 0.3rem; color: #536863; font-size: 0.68rem; font-weight: 750; }
+.prescription-item label:first-of-type, .prescription-item label:last-of-type { grid-column: 1 / -1; }
+.prescription-item__remove { grid-column: 1 / -1; justify-self: end; margin-top: 0.45rem; color: #805148; }
+.follow-up-toggle { display: flex; align-items: center; gap: 0.55rem; margin-top: 0.7rem; color: #253d4d; font-size: 0.8rem; font-weight: 700; }
+.follow-up-toggle input { width: 1rem; }
+.follow-up-fields { display: grid; grid-template-columns: auto 5rem minmax(6.5rem, 1fr); gap: 0.55rem; align-items: center; margin-top: 0.8rem; color: #52645f; font-size: 0.78rem; }
+.follow-up-target { margin-top: 0.65rem; color: #2c6658; font-size: 0.76rem; font-weight: 700; }
+.clinical-workspace__actions { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; border-top: 1px solid rgba(15, 39, 71, 0.14); background: #f2eee5; padding: 0.8rem 1.15rem; }
+.clinical-workspace__actions > span { color: #66756f; font-size: 0.72rem; font-weight: 700; }
+.clinical-workspace__actions > div { display: flex; gap: 0.55rem; }
 .appointment-detail-loading { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(19rem, 0.9fr); gap: 4.5rem; margin-top: 3.6rem; }
 .appointment-detail-loading div { height: 28rem; border: 1px solid #e0dbd2; border-radius: 0.7rem; background: #fffdf9; }
 .appointment-detail-error { margin-top: 3rem; border-top: 1px solid #dfc4bc; border-bottom: 1px solid #dfc4bc; padding: 2.2rem 0; text-align: center; }
@@ -1401,6 +1435,21 @@ select {
   .consultation-room-status { flex-direction: column; gap: 0.18rem; }
   .consultation-room-footer { align-items: stretch; flex-direction: column; }
   .consultation-room-frame { min-height: 18rem; }
+  .active-consultation-layout { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
+  .active-consultation-layout > .clinical-workspace { overflow: visible; border-width: 1px 0 0; }
+  .active-consultation-layout .consultation-room-frame { min-height: 17rem; }
+  .prescription-item { grid-template-columns: minmax(0, 1fr); }
+  .prescription-item label:first-of-type, .prescription-item label:last-of-type { grid-column: auto; }
+  .prescription-item__remove { grid-column: auto; }
+  .follow-up-fields { grid-template-columns: minmax(0, 1fr) 4.7rem minmax(0, 1fr); }
+  .clinical-workspace__actions { align-items: stretch; flex-direction: column; }
+  .clinical-workspace__actions > div { display: grid; grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (min-width: 640px) and (max-width: 1023px) {
+  .active-consultation-layout { grid-template-columns: minmax(0, 1.35fr) minmax(19rem, 1fr); }
+  .prescription-item { grid-template-columns: minmax(0, 1fr); }
+  .prescription-item label:first-of-type, .prescription-item label:last-of-type, .prescription-item__remove { grid-column: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

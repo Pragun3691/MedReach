@@ -173,6 +173,41 @@ async function findAppointment(client, appointmentId) {
   return result.rows[0] ?? null
 }
 
+async function findClinicalWorkspace(client, appointmentId) {
+  const result = await client.query(
+    `SELECT
+       consultation.id,
+       consultation.appointment_id,
+       consultation.started_at,
+       consultation.finished_at,
+       consultation.notes,
+       consultation.follow_up_interval,
+       consultation.follow_up_unit,
+       consultation.follow_up_target_at,
+       a.status AS appointment_status,
+       ab.doctor_id,
+       COALESCE((
+         SELECT jsonb_agg(jsonb_build_object(
+           'id', item.id,
+           'medicineName', item.medicine_name,
+           'dosage', item.dosage,
+           'frequency', item.frequency,
+           'duration', item.duration,
+           'instructions', COALESCE(item.instructions, '')
+         ) ORDER BY item.position)
+         FROM consultation_prescription_items item
+         WHERE item.consultation_id = consultation.id
+       ), '[]'::jsonb) AS prescription_items
+     FROM consultations consultation
+     JOIN appointments a ON a.id = consultation.appointment_id
+     JOIN slots s ON s.id = a.slot_id
+     JOIN availability_blocks ab ON ab.id = s.availability_block_id
+     WHERE consultation.appointment_id = $1`,
+    [appointmentId],
+  )
+  return result.rows[0] ?? null
+}
+
 async function createNotification(client, recipientUserId, type, message, appointmentId) {
   await client.query(
     `INSERT INTO notifications (recipient_user_id, type, message, action_path)
@@ -255,6 +290,49 @@ export function createAppointmentRepository(databaseProvider = getPool) {
 
   async findById(appointmentId) {
     return findAppointment(databaseProvider(), appointmentId)
+  },
+
+  async getClinicalWorkspace({ appointmentId, doctorId }) {
+    const workspace = await findClinicalWorkspace(databaseProvider(), appointmentId)
+    if (!workspace) throw new AppointmentDataError('CLINICAL_WORKSPACE_UNAVAILABLE')
+    if (Number(workspace.doctor_id) !== doctorId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+    return workspace
+  },
+
+  async saveClinicalDraft({ appointmentId, doctorId, draft }) {
+    return withTransaction(databaseProvider, async client => {
+      const appointment = await lockAppointment(client, appointmentId)
+      if (!appointment) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
+      if (Number(appointment.doctor_id) !== doctorId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      const consultation = await lockConsultation(client, appointmentId)
+      if (appointment.status !== 'booked' || !consultation || consultation.finished_at) {
+        throw new AppointmentDataError('CLINICAL_WORKSPACE_LOCKED')
+      }
+
+      await client.query(
+        `UPDATE consultations
+         SET notes = $2,
+             follow_up_interval = $3,
+             follow_up_unit = $4,
+             follow_up_target_at = NULL,
+             updated_at = current_timestamp
+         WHERE appointment_id = $1`,
+        [appointmentId, draft.notes, draft.followUp?.interval ?? null, draft.followUp?.unit ?? null],
+      )
+      await client.query(
+        'DELETE FROM consultation_prescription_items WHERE consultation_id = $1',
+        [consultation.id],
+      )
+      for (const [position, item] of draft.prescriptionItems.entries()) {
+        await client.query(
+          `INSERT INTO consultation_prescription_items (
+             consultation_id, position, medicine_name, dosage, frequency, duration, instructions
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [consultation.id, position, item.medicineName, item.dosage, item.frequency, item.duration, item.instructions || null],
+        )
+      }
+      return findClinicalWorkspace(client, appointmentId)
+    })
   },
 
   async cancel({ appointmentId, actorId, actorRole, reason, now = new Date() }) {
@@ -482,7 +560,13 @@ export function createAppointmentRepository(databaseProvider = getPool) {
 
       await client.query(
         `UPDATE consultations
-         SET finished_at = $2, updated_at = current_timestamp
+         SET finished_at = $2,
+             follow_up_target_at = CASE
+               WHEN follow_up_interval IS NULL THEN NULL
+               WHEN follow_up_unit = 'weeks' THEN $2::timestamptz + (follow_up_interval * 7 * interval '1 day')
+               ELSE $2::timestamptz + (follow_up_interval * interval '1 day')
+             END,
+             updated_at = current_timestamp
          WHERE appointment_id = $1`,
         [appointmentId, now],
       )

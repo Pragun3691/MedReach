@@ -2,6 +2,7 @@ import {
   appointmentIdSchema,
   bookingSchema,
   cancellationSchema,
+  clinicalDraftSchema,
   rescheduleSchema,
 } from '../validation/appointment.schemas.js'
 
@@ -71,6 +72,19 @@ export function createAppointmentController(service) {
       const appointmentId = appointmentIdSchema.parse(request.params.appointmentId)
       const appointment = await service.finishConsultation(appointmentId, request.authUser)
       response.status(200).json({ appointment })
+    },
+
+    async getClinicalWorkspace(request, response) {
+      const appointmentId = appointmentIdSchema.parse(request.params.appointmentId)
+      const consultation = await service.getClinicalWorkspace(appointmentId, request.authUser)
+      response.status(200).json({ consultation })
+    },
+
+    async saveClinicalDraft(request, response) {
+      const appointmentId = appointmentIdSchema.parse(request.params.appointmentId)
+      const draft = clinicalDraftSchema.parse(request.body)
+      const consultation = await service.saveClinicalDraft(appointmentId, request.authUser, draft)
+      response.status(200).json({ consultation })
     },
 
     async createVideoSession(request, response) {

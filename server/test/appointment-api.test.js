@@ -636,6 +636,110 @@ describe('consultation lifecycle API', () => {
   })
 })
 
+describe('consultation clinical workspace API', () => {
+  let context
+  let app
+  let patient
+  let doctor
+  let otherDoctor
+  let admin
+  let appointmentId
+  let currentTime
+
+  beforeEach(async () => {
+    currentTime = new Date('2030-01-01T00:55:00.000Z')
+    context = createBookingTestContext({ clock: () => currentTime })
+    const slot = context.slots.find(item => item.id === 101)
+    slot.startAt = '2030-01-01T01:00:00.000Z'
+    slot.endAt = '2030-01-01T01:30:00.000Z'
+    app = createApp(context.services)
+    patient = await login(app, 'patient@example.test')
+    doctor = await login(app, 'doctor@example.test')
+    otherDoctor = await login(app, 'other-doctor@example.test')
+    admin = await login(app, 'admin@example.test')
+    appointmentId = (await patient.post('/api/appointments').send({ slotId: 101 })).body.appointment.id
+    await doctor.post(`/api/appointments/${appointmentId}/open-room`)
+    await doctor.post(`/api/appointments/${appointmentId}/begin-consultation`)
+  })
+
+  const draft = {
+    notes: 'Reported symptoms and care guidance.',
+    prescriptionItems: [
+      { medicineName: 'Medicine A', dosage: '10 mg', frequency: 'Once daily', duration: '5 days', instructions: 'After food' },
+      { medicineName: 'Medicine B', dosage: '5 ml', frequency: 'Twice daily', duration: '3 days', instructions: '' },
+    ],
+    followUp: { interval: 2, unit: 'weeks' },
+  }
+
+  it('allows only the assigned Doctor to read active draft clinical data', async () => {
+    const allowed = await doctor.get(`/api/appointments/${appointmentId}/consultation`)
+    expect(allowed.status).toBe(200)
+    expect(allowed.body.consultation).toMatchObject({ consultationId: expect.any(Number), notes: '', prescriptionItems: [], followUp: null, editable: true })
+    expect((await otherDoctor.get(`/api/appointments/${appointmentId}/consultation`)).status).toBe(403)
+    expect((await patient.get(`/api/appointments/${appointmentId}/consultation`)).status).toBe(403)
+    expect((await admin.get(`/api/appointments/${appointmentId}/consultation`)).status).toBe(403)
+  })
+
+  it('saves notes, multiple structured medicines, and optional follow-up as one draft', async () => {
+    const saved = await doctor.patch(`/api/appointments/${appointmentId}/consultation`).send(draft)
+    expect(saved.status).toBe(200)
+    expect(saved.body.consultation).toMatchObject({ notes: draft.notes, prescriptionItems: draft.prescriptionItems, followUp: { interval: 2, unit: 'weeks', targetAt: null }, editable: true })
+    expect(context.consultations[0]).toMatchObject({ notes: draft.notes, prescriptionItems: draft.prescriptionItems })
+  })
+
+  it('accepts zero medicines and no follow-up', async () => {
+    const response = await doctor.patch(`/api/appointments/${appointmentId}/consultation`).send({ notes: '', prescriptionItems: [], followUp: null })
+    expect(response.status).toBe(200)
+    expect(response.body.consultation).toMatchObject({ prescriptionItems: [], followUp: null })
+  })
+
+  it.each([
+    [{ ...draft, followUp: { interval: 0, unit: 'days' } }, 'followUp.interval'],
+    [{ ...draft, followUp: { interval: 2, unit: 'months' } }, 'followUp.unit'],
+    [{ ...draft, prescriptionItems: [{ ...draft.prescriptionItems[0], medicineName: '' }] }, 'prescriptionItems.0.medicineName'],
+    [{ ...draft, unexpected: true }, ''],
+  ])('rejects malformed clinical drafts without persisting them', async (payload, field) => {
+    const response = await doctor.patch(`/api/appointments/${appointmentId}/consultation`).send(payload)
+    expect(response.status).toBe(400)
+    expect(response.body.error.code).toBe('VALIDATION_ERROR')
+    if (field) expect(response.body.error.details.some(item => item.field === field)).toBe(true)
+    expect(context.consultations[0].notes).toBe('')
+  })
+
+  it('denies PATCH to the wrong Doctor, Patient, and Admin', async () => {
+    const responses = await Promise.all([
+      otherDoctor.patch(`/api/appointments/${appointmentId}/consultation`).send(draft),
+      patient.patch(`/api/appointments/${appointmentId}/consultation`).send(draft),
+      admin.patch(`/api/appointments/${appointmentId}/consultation`).send(draft),
+    ])
+    expect(responses.map(response => response.status)).toEqual([403, 403, 403])
+    expect(context.consultations[0].notes).toBe('')
+  })
+
+  it('locks edits after Finish while retaining assigned-Doctor read-only access and deriving the target from finished_at', async () => {
+    await doctor.patch(`/api/appointments/${appointmentId}/consultation`).send(draft)
+    currentTime = new Date('2030-01-01T02:00:00.000Z')
+    const finish = await doctor.post(`/api/appointments/${appointmentId}/consultation/finish`)
+    const lateSave = await doctor.patch(`/api/appointments/${appointmentId}/consultation`).send({ ...draft, notes: 'Late mutation' })
+    const record = await doctor.get(`/api/appointments/${appointmentId}/consultation`)
+    expect(finish.body.appointment.status).toBe('completed')
+    expect(lateSave.status).toBe(409)
+    expect(record.body.consultation).toMatchObject({ notes: draft.notes, editable: false, followUp: { interval: 2, unit: 'weeks', targetAt: '2030-01-15T02:00:00.000Z' } })
+  })
+
+  it('does not expose a consultation-id request field as an authorization bypass', async () => {
+    const response = await doctor.patch(`/api/appointments/${appointmentId}/consultation`).send({ ...draft, consultationId: 999999 })
+    expect(response.status).toBe(400)
+    expect(context.consultations[0].notes).toBe('')
+  })
+
+  it('rejects clinical creation for an appointment whose Consultation was never begun', async () => {
+    const second = (await patient.post('/api/appointments').send({ slotId: 102 })).body.appointment.id
+    expect((await doctor.get(`/api/appointments/${second}/consultation`)).status).toBe(409)
+    expect((await doctor.patch(`/api/appointments/${second}/consultation`).send(draft)).status).toBe(409)
+  })
+})
+
 describe('appointment video-token API', () => {
   let context
   let app

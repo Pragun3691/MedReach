@@ -10,6 +10,29 @@ function optionalNumber(value) {
   return value === null || value === undefined ? null : Number(value)
 }
 
+function mapClinicalWorkspace(row) {
+  return {
+    consultationId: Number(row.id),
+    startedAt: row.started_at,
+    finishedAt: row.finished_at ?? null,
+    notes: row.notes ?? '',
+    prescriptionItems: row.prescription_items.map(item => ({
+      id: Number(item.id),
+      medicineName: item.medicineName,
+      dosage: item.dosage,
+      frequency: item.frequency,
+      duration: item.duration,
+      instructions: item.instructions,
+    })),
+    followUp: row.follow_up_interval ? {
+      interval: Number(row.follow_up_interval),
+      unit: row.follow_up_unit,
+      targetAt: row.follow_up_target_at ?? null,
+    } : null,
+    editable: row.appointment_status === 'booked' && row.finished_at == null,
+  }
+}
+
 function mapAppointment(row, user, now = new Date()) {
   const consultation = row.consultation_id ? {
     id: Number(row.consultation_id),
@@ -102,6 +125,8 @@ function translateDataError(error) {
     CONSULTATION_NOT_BEGINNABLE: [409, 'CONSULTATION_NOT_BEGINNABLE', 'The consultation cannot be started at this time'],
     APPOINTMENT_NOT_NO_SHOWABLE: [409, 'APPOINTMENT_NOT_NO_SHOWABLE', 'This appointment cannot be marked as a no-show'],
     CONSULTATION_NOT_FINISHABLE: [409, 'CONSULTATION_NOT_FINISHABLE', 'The consultation cannot be finished'],
+    CLINICAL_WORKSPACE_UNAVAILABLE: [409, 'CLINICAL_WORKSPACE_UNAVAILABLE', 'The clinical workspace is not available for this appointment'],
+    CLINICAL_WORKSPACE_LOCKED: [409, 'CLINICAL_WORKSPACE_LOCKED', 'This consultation is finished and its clinical record is read-only'],
     VIDEO_SESSION_UNAVAILABLE: [409, 'VIDEO_SESSION_UNAVAILABLE', 'Video access is not available for this appointment'],
     SAME_SLOT: [400, 'SAME_SLOT', 'Choose a different slot to reschedule'],
   }
@@ -211,6 +236,22 @@ export function createAppointmentService(repository = appointmentRepository, clo
     async finishConsultation(appointmentId, doctor) {
       try {
         return mapAppointment(await repository.finishConsultation({ appointmentId, doctorId: doctor.id, now: clock() }), doctor, clock())
+      } catch (error) {
+        translateDataError(error)
+      }
+    },
+
+    async getClinicalWorkspace(appointmentId, doctor) {
+      try {
+        return mapClinicalWorkspace(await repository.getClinicalWorkspace({ appointmentId, doctorId: doctor.id }))
+      } catch (error) {
+        translateDataError(error)
+      }
+    },
+
+    async saveClinicalDraft(appointmentId, doctor, draft) {
+      try {
+        return mapClinicalWorkspace(await repository.saveClinicalDraft({ appointmentId, doctorId: doctor.id, draft }))
       } catch (error) {
         translateDataError(error)
       }

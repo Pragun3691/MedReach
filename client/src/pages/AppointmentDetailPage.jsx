@@ -4,12 +4,13 @@ import { CancellationDialog } from '../components/CancellationDialog.jsx'
 import { DeviceCheck } from '../components/DeviceCheck.jsx'
 import { DeviceCheckDialog } from '../components/DeviceCheckDialog.jsx'
 import { JaasMeeting } from '../components/JaasMeeting.jsx'
+import { ClinicalWorkspace } from '../components/ClinicalWorkspace.jsx'
 import { PublicFooter } from '../components/PublicFooter.jsx'
 import { PublicHeader } from '../components/PublicHeader.jsx'
 import { useAuth } from '../hooks/useAuth.js'
 import { appointmentStatusLabels, getAppointmentDisplayStatus } from '../lib/appointment-display.js'
 import { formatAppointmentTime, formatFee } from '../lib/appointment-format.js'
-import { beginAppointmentConsultation, cancelAppointment, getAppointment, getAppointmentVideoSession, markAppointmentNoShow, markAppointmentReady, openAppointmentRoom } from '../lib/api.js'
+import { beginAppointmentConsultation, cancelAppointment, finishAppointmentConsultation, getAppointment, getAppointmentConsultation, getAppointmentVideoSession, markAppointmentNoShow, markAppointmentReady, openAppointmentRoom, saveAppointmentConsultation } from '../lib/api.js'
 import { resolveDoctorPortrait } from '../lib/doctor-portraits.js'
 
 const stateTime = value => new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }).format(new Date(value))
@@ -39,14 +40,14 @@ function PreCallDialog({ appointment, pending, error, onClose, onJoin }) {
   </section></div>
 }
 
-function VideoRoom({ appointment, isDoctor, session, localJoined, participantConnected, error, onBegin, onClose, onConferenceLeft, onLocalJoined, onParticipantJoined, onParticipantLeft, onVideoError }) {
+function VideoRoom({ appointment, clinicalWorkspace, isDoctor, session, localJoined, participantConnected, error, onBegin, onClose, onConferenceLeft, onLocalJoined, onParticipantJoined, onParticipantLeft, onVideoError }) {
   const inProgress = Boolean(appointment.consultationFlow.consultationStartedAt)
   return <div aria-labelledby="room-heading" aria-modal="true" className="consultation-room-shell" role="dialog">
     <header className="consultation-room-header"><div><p>MedReach consultation</p><h2 id="room-heading">{isDoctor ? appointment.patient.fullName : appointment.doctor.fullName}</h2></div><button onClick={onClose} type="button">Leave room</button></header>
     <div aria-live="polite" className="consultation-room-status"><strong>{localJoined ? 'Connected to consultation room' : 'Connecting to consultation room…'}</strong><span>{participantConnected ? (isDoctor ? 'Patient connected' : 'Doctor connected') : (isDoctor ? 'Waiting for patient to connect' : 'Waiting for doctor')}</span></div>
     {error && <p className="consultation-room-error" role="alert">{error}</p>}
-    <JaasMeeting className="consultation-room-frame" onConferenceLeft={onConferenceLeft} onError={onVideoError} onLocalJoined={onLocalJoined} onParticipantJoined={onParticipantJoined} onParticipantLeft={onParticipantLeft} session={session} />
-    {isDoctor && <footer className="consultation-room-footer"><div><strong>{inProgress ? 'Consultation in progress' : 'Clinical consultation not started'}</strong><span>{inProgress ? 'The clinical workspace will be added in the next stage.' : 'Entering the room does not begin the MedReach Consultation.'}</span></div>{!inProgress && appointment.consultationFlow.canBeginConsultation && <button className="consultation-primary-button" onClick={onBegin} type="button">Begin consultation →</button>}</footer>}
+    <div className={isDoctor && inProgress ? 'active-consultation-layout' : 'active-consultation-layout active-consultation-layout--video-only'}><JaasMeeting className="consultation-room-frame" onConferenceLeft={onConferenceLeft} onError={onVideoError} onLocalJoined={onLocalJoined} onParticipantJoined={onParticipantJoined} onParticipantLeft={onParticipantLeft} session={session} />{isDoctor && inProgress && clinicalWorkspace}</div>
+    {isDoctor && <footer className="consultation-room-footer"><div><strong>{inProgress ? 'Consultation in progress' : 'Clinical consultation not started'}</strong><span>{inProgress ? 'Leaving the video room will not finish this consultation.' : 'Entering the room does not begin the MedReach Consultation.'}</span></div>{!inProgress && appointment.consultationFlow.canBeginConsultation && <button className="consultation-primary-button" onClick={onBegin} type="button">Begin consultation →</button>}</footer>}
   </div>
 }
 
@@ -64,6 +65,10 @@ export function AppointmentDetailPage() {
   const [confirmation, setConfirmation] = useState(null)
   const [localJoined, setLocalJoined] = useState(false)
   const [participantConnected, setParticipantConnected] = useState(false)
+  const [clinicalVersion, setClinicalVersion] = useState(0)
+  const [clinicalRevision, setClinicalRevision] = useState(0)
+  const [clinicalState, setClinicalState] = useState({ key: null, consultation: null, error: '' })
+  const [clinicalPending, setClinicalPending] = useState('')
   const [nowMs, setNowMs] = useState(() => Date.now())
   const connectedParticipantId = useRef(null)
   const refresh = useCallback(() => setVersion(value => value + 1), [])
@@ -97,6 +102,20 @@ export function AppointmentDetailPage() {
     const timeout = window.setTimeout(refresh, Math.min(next - now + 100, 2_147_483_647))
     return () => window.clearTimeout(timeout)
   }, [appointment, refresh])
+
+  const consultationId = appointment?.consultationFlow.consultationId
+  const clinicalKey = `${consultationId ?? 'none'}:${clinicalVersion}`
+  useEffect(() => {
+    if (!isDoctor || !consultationId) return undefined
+    const controller = new AbortController()
+    const key = clinicalKey
+    getAppointmentConsultation(appointment.id, controller.signal)
+      .then(({ consultation }) => setClinicalState({ key, consultation, error: '' }))
+      .catch(error => {
+        if (error.name !== 'AbortError') setClinicalState({ key, consultation: null, error: error.message })
+      })
+    return () => controller.abort()
+  }, [appointment, clinicalKey, consultationId, isDoctor])
 
   async function runAction(name, request) {
     if (action.pending) return false
@@ -150,22 +169,58 @@ export function AppointmentDetailPage() {
     if (kind === 'no-show') await runAction('no-show', () => markAppointmentNoShow(appointment.id))
   }
 
+  async function saveClinicalDraft(draft) {
+    if (clinicalPending) throw new Error('A clinical action is already in progress.')
+    setClinicalPending('save')
+    try {
+      const { consultation } = await saveAppointmentConsultation(appointment.id, draft)
+      setClinicalState({ key: clinicalKey, consultation, error: '' })
+      setClinicalRevision(value => value + 1)
+    } catch (error) {
+      if (error.status === 409) {
+        refresh()
+        setClinicalVersion(value => value + 1)
+      }
+      throw error
+    } finally {
+      setClinicalPending('')
+    }
+  }
+
+  async function finishClinicalConsultation() {
+    if (clinicalPending) throw new Error('A clinical action is already in progress.')
+    setClinicalPending('finish')
+    try {
+      await finishAppointmentConsultation(appointment.id)
+      setClinicalVersion(value => value + 1)
+      refresh()
+    } finally {
+      setClinicalPending('')
+    }
+  }
+
+  const clinicalWorkspace = isDoctor && consultationId && clinicalState.key === clinicalKey && clinicalState.consultation
+    ? <ClinicalWorkspace consultation={clinicalState.consultation} error={clinicalState.error} key={`${clinicalKey}:${clinicalRevision}`} onFinish={finishClinicalConsultation} onSave={saveClinicalDraft} pending={clinicalPending} />
+    : null
+
   return <div className="appointment-detail-page min-h-screen"><PublicHeader editorial /><main className="appointment-detail-shell">
     <Link className="appointment-detail-back" to={isDoctor ? '/doctor/appointments' : '/appointments'}><span aria-hidden="true">←</span> Back to appointments</Link>
     {loading && <div aria-label="Loading appointment details" className="appointment-detail-loading animate-pulse"><div /><div /></div>}
     {!loading && state.error && <section className="appointment-detail-error"><h1>We couldn’t load this appointment</h1><p>{state.error.message}</p><button onClick={refresh} type="button">Try again</button></section>}
-    {appointment && <AppointmentWorkspace action={action} appointment={appointment} isDoctor={isDoctor} nowMs={nowMs} onCancel={() => setCancellationOpen(true)} onDeviceCheck={() => setDeviceCheckOpen(true)} onJoin={() => { setAction({ pending: '', error: '' }); setPreCallOpen(true) }} onMarkNoShow={() => setConfirmation('no-show')} onMarkReady={() => runAction('ready', () => markAppointmentReady(appointment.id))} onOpenRoom={() => runAction('open-room', () => openAppointmentRoom(appointment.id))} />}
+    {appointment && <AppointmentWorkspace action={action} appointment={appointment} clinicalWorkspace={videoSession ? null : clinicalWorkspace} isDoctor={isDoctor} nowMs={nowMs} onCancel={() => setCancellationOpen(true)} onDeviceCheck={() => setDeviceCheckOpen(true)} onJoin={() => { setAction({ pending: '', error: '' }); setPreCallOpen(true) }} onMarkNoShow={() => setConfirmation('no-show')} onMarkReady={() => runAction('ready', () => markAppointmentReady(appointment.id))} onOpenRoom={() => runAction('open-room', () => openAppointmentRoom(appointment.id))} />}
+    {isDoctor && consultationId && clinicalState.key !== clinicalKey && <p className="clinical-loading">Loading clinical workspace…</p>}
+    {isDoctor && consultationId && clinicalState.key === clinicalKey && !clinicalState.consultation && <p className="consultation-action-error" role="alert">{clinicalState.error}</p>}
   </main><PublicFooter />
   {cancellationOpen && appointment && <CancellationDialog doctorRequired={isDoctor} onClose={() => setCancellationOpen(false)} onConfirm={confirmCancellation} />}
   {deviceCheckOpen && <DeviceCheckDialog onClose={() => setDeviceCheckOpen(false)} />}
   {preCallOpen && appointment && <PreCallDialog appointment={appointment} error={action.error} onClose={() => setPreCallOpen(false)} onJoin={enterRoom} pending={action.pending === 'video'} />}
-  {videoSession && appointment && <VideoRoom appointment={appointment} error={videoError} isDoctor={isDoctor} localJoined={localJoined} onBegin={() => setConfirmation('begin')} onClose={leaveRoom} onConferenceLeft={leaveRoom} onLocalJoined={() => setLocalJoined(true)} onParticipantJoined={participantJoined} onParticipantLeft={participantLeft} onVideoError={error => setVideoError(error.message)} participantConnected={participantConnected} session={videoSession} />}
+  {videoSession && appointment && <VideoRoom appointment={appointment} clinicalWorkspace={clinicalWorkspace} error={videoError} isDoctor={isDoctor} localJoined={localJoined} onBegin={() => setConfirmation('begin')} onClose={leaveRoom} onConferenceLeft={leaveRoom} onLocalJoined={() => setLocalJoined(true)} onParticipantJoined={participantJoined} onParticipantLeft={participantLeft} onVideoError={error => setVideoError(error.message)} participantConnected={participantConnected} session={videoSession} />}
   {confirmation === 'begin' && <ConfirmDialog confirmLabel="Begin consultation" heading="Begin clinical consultation?" message="This starts the MedReach consultation record for this appointment." onCancel={() => setConfirmation(null)} onConfirm={confirmAction} pending={action.pending === 'begin'} />}
   {confirmation === 'no-show' && appointment && <ConfirmDialog confirmLabel="Mark as no-show" heading="Mark patient as a no-show?" message={appointment.consultationFlow.readyAt ? `This patient marked themselves ready at ${stateTime(appointment.consultationFlow.readyAt)}. Are you sure you want to mark them as a no-show?` : 'The Patient will be notified that this appointment was marked as a no-show.'} onCancel={() => setConfirmation(null)} onConfirm={confirmAction} pending={action.pending === 'no-show'} />}
   </div>
 }
 
-function AppointmentWorkspace({ appointment, action, isDoctor, nowMs, onCancel, onDeviceCheck, onJoin, onMarkNoShow, onMarkReady, onOpenRoom }) {
+function AppointmentWorkspace({ appointment, action, clinicalWorkspace, isDoctor, nowMs, onCancel, onDeviceCheck, onJoin, onMarkNoShow, onMarkReady, onOpenRoom }) {
   const portrait = resolveDoctorPortrait(appointment.doctor)
   const flow = appointment.consultationFlow
   const isUpcoming = appointment.status === 'booked' && new Date(appointment.slot.startAt) > new Date()
@@ -176,7 +231,7 @@ function AppointmentWorkspace({ appointment, action, isDoctor, nowMs, onCancel, 
       <ConsultationActions action={action} appointment={appointment} isDoctor={isDoctor} nowMs={nowMs} onDeviceCheck={onDeviceCheck} onJoin={onJoin} onMarkNoShow={onMarkNoShow} onMarkReady={onMarkReady} onOpenRoom={onOpenRoom} />
       {canManage && <div className="appointment-state-panel__management"><p>Manage appointment</p>{!isDoctor && flow.canReschedule && <Link className="appointment-state-panel__reschedule" to={`/doctors/${appointment.doctor.id}?${new URLSearchParams({ rescheduleFrom: String(appointment.id) })}`}>Reschedule appointment <span aria-hidden="true">→</span></Link>}{flow.canCancel && <button className="appointment-state-panel__cancel" onClick={onCancel} type="button">Cancel appointment</button>}</div>}
       {appointment.status !== 'booked' && <p className="appointment-state-panel__past-note">This appointment is part of your previous care activity.</p>}</aside>
-    <p className="appointment-detail-reference">Appointment reference: #{appointment.id}</p>
+    <p className="appointment-detail-reference">Appointment reference: #{appointment.id}</p>{clinicalWorkspace && <div className="appointment-clinical-record">{clinicalWorkspace}</div>}
     {(appointment.cancellation || appointment.rescheduledFromAppointmentId || appointment.replacementAppointmentId) && <section aria-labelledby="history-heading" className="appointment-detail-history"><p className="appointment-detail-eyebrow">Appointment history</p><h2 id="history-heading">Previous activity</h2>{appointment.cancellation && <div><p>Cancelled {new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(new Date(appointment.cancellation.cancelledAt))}.</p>{appointment.cancellation.reason && <p><strong>Reason:</strong> {appointment.cancellation.reason}</p>}</div>}{appointment.rescheduledFromAppointmentId && <p>This booking replaces <Link to={`/appointments/${appointment.rescheduledFromAppointmentId}`}>appointment #{appointment.rescheduledFromAppointmentId}</Link>.</p>}{appointment.replacementAppointmentId && <p>This booking was replaced by <Link to={`/appointments/${appointment.replacementAppointmentId}`}>appointment #{appointment.replacementAppointmentId}</Link>.</p>}</section>}
   </div>
 }
@@ -189,7 +244,7 @@ export function ConsultationActions({ appointment, action, isDoctor, nowMs, onDe
   const canJoin = Boolean(flow.roomOpenedAt) && (active || beforeEnd)
   if (isDoctor) return <section aria-label="Doctor consultation actions" className="consultation-actions">
     {flow.readyAt && <div className="consultation-state-callout consultation-state-callout--ready"><strong>Patient Waiting</strong><span>Ready since {stateTime(flow.readyAt)}</span></div>}
-    {active ? <div className="consultation-state-callout"><strong>Consultation in progress</strong><span>The clinical workspace will be available in the next stage.</span></div> : flow.roomOpenedAt ? <div className="consultation-state-callout"><strong>Room opened</strong><span>Waiting for patient to connect.</span></div> : flow.canOpenRoom ? <button className="consultation-primary-button" disabled={Boolean(action.pending)} onClick={onOpenRoom} type="button">{action.pending === 'open-room' ? 'Opening room…' : 'Open consultation room →'}</button> : beforeEnd ? <div className="consultation-state-callout consultation-state-callout--quiet"><strong>Consultation room opens at {stateTime(flow.doctorRoomOpensAt)}</strong></div> : <div className="consultation-state-callout consultation-state-callout--quiet"><strong>The room-opening window has ended.</strong></div>}
+    {active ? <div className="consultation-state-callout"><strong>Consultation in progress</strong><span>Your clinical workspace is ready below.</span></div> : flow.roomOpenedAt ? <div className="consultation-state-callout"><strong>Room opened</strong><span>Waiting for patient to connect.</span></div> : flow.canOpenRoom ? <button className="consultation-primary-button" disabled={Boolean(action.pending)} onClick={onOpenRoom} type="button">{action.pending === 'open-room' ? 'Opening room…' : 'Open consultation room →'}</button> : beforeEnd ? <div className="consultation-state-callout consultation-state-callout--quiet"><strong>Consultation room opens at {stateTime(flow.doctorRoomOpensAt)}</strong></div> : <div className="consultation-state-callout consultation-state-callout--quiet"><strong>The room-opening window has ended.</strong></div>}
     {canJoin && <button className="consultation-primary-button" disabled={Boolean(action.pending)} onClick={onJoin} type="button">Enter consultation room →</button>}
     {flow.canMarkNoShow && !flow.consultationId && <button className="consultation-text-button" disabled={Boolean(action.pending)} onClick={onMarkNoShow} type="button">Mark patient as no-show</button>}
     {action.error && <p className="consultation-action-error" role="alert">{action.error}</p>}

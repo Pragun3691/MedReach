@@ -237,6 +237,75 @@ describe('appointment repository transactions', () => {
     expect(statements).not.toContain('COMMIT')
   })
 
+  it('rolls back notes, follow-up, and medicine replacement when a prescription insert fails', async () => {
+    const statements = []
+    const failure = new Error('prescription insert failed')
+    const activeConsultation = { id: 44, appointment_id: 1000, started_at: '2030-01-01T08:55:00.000Z', finished_at: null }
+    const { database } = databaseWith(vi.fn(async (sql, parameters) => {
+      statements.push(sql)
+      if (sql === 'BEGIN' || sql === 'ROLLBACK') return { rows: [] }
+      if (sql.includes('FOR UPDATE OF a')) return { rows: [appointmentRow] }
+      if (sql.includes('FROM consultations') && sql.includes('FOR UPDATE')) return { rows: [activeConsultation] }
+      if (sql.includes('UPDATE consultations')) {
+        expect(parameters).toEqual([1000, 'New notes', 2, 'weeks'])
+        return { rows: [] }
+      }
+      if (sql.startsWith('DELETE FROM consultation_prescription_items')) return { rows: [] }
+      if (sql.includes('INSERT INTO consultation_prescription_items')) throw failure
+      throw new Error(`Unexpected SQL: ${sql}`)
+    }))
+    const repository = createAppointmentRepository(() => database)
+
+    await expect(repository.saveClinicalDraft({
+      appointmentId: 1000,
+      doctorId: 10,
+      draft: {
+        notes: 'New notes',
+        prescriptionItems: [{ medicineName: 'Medicine A', dosage: '10 mg', frequency: 'Daily', duration: '5 days', instructions: '' }],
+        followUp: { interval: 2, unit: 'weeks' },
+      },
+    })).rejects.toBe(failure)
+
+    expect(statements.some(sql => sql.includes('UPDATE consultations'))).toBe(true)
+    expect(statements.some(sql => sql.startsWith('DELETE FROM consultation_prescription_items'))).toBe(true)
+    expect(statements).toContain('ROLLBACK')
+    expect(statements).not.toContain('COMMIT')
+  })
+
+  it('uses the same appointment-then-consultation lock order for Save and Finish', async () => {
+    const activeConsultation = { id: 44, appointment_id: 1000, started_at: '2030-01-01T08:55:00.000Z', finished_at: null }
+    const clinicalRow = {
+      ...activeConsultation,
+      notes: '',
+      prescription_items: [],
+      follow_up_interval: null,
+      follow_up_unit: null,
+      follow_up_target_at: null,
+      appointment_status: 'booked',
+      doctor_id: 10,
+    }
+    const saveStatements = []
+    const saveDatabase = databaseWith(vi.fn(async sql => {
+      saveStatements.push(sql)
+      if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] }
+      if (sql.includes('FOR UPDATE OF a')) return { rows: [appointmentRow] }
+      if (sql.includes('FROM consultations') && sql.includes('FOR UPDATE')) return { rows: [activeConsultation] }
+      if (sql.includes('UPDATE consultations') || sql.startsWith('DELETE FROM consultation_prescription_items')) return { rows: [] }
+      if (sql.includes('FROM consultations consultation')) return { rows: [clinicalRow] }
+      throw new Error(`Unexpected SQL: ${sql}`)
+    })).database
+    await createAppointmentRepository(() => saveDatabase).saveClinicalDraft({
+      appointmentId: 1000,
+      doctorId: 10,
+      draft: { notes: '', prescriptionItems: [], followUp: null },
+    })
+
+    const appointmentLock = saveStatements.findIndex(sql => sql.includes('FOR UPDATE OF a'))
+    const consultationLock = saveStatements.findIndex(sql => sql.includes('FROM consultations') && sql.includes('FOR UPDATE'))
+    expect(appointmentLock).toBeGreaterThan(-1)
+    expect(appointmentLock).toBeLessThan(consultationLock)
+  })
+
   it('authorizes active-Consultation reconnect after slot end under row locks', async () => {
     const statements = []
     const activeConsultation = { id: 44, appointment_id: 1000, started_at: '2030-01-01T08:55:00.000Z', finished_at: null }

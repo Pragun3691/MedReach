@@ -77,6 +77,8 @@ Doctor profiles remain private until their verification is approved.
 - `POST /api/appointments/:appointmentId/ready` — owning Patient marks Ready from T-15 until slot end
 - `POST /api/appointments/:appointmentId/open-room` — assigned Doctor opens the room from T-5 until slot end
 - `POST /api/appointments/:appointmentId/begin-consultation` — assigned Doctor begins the clinical encounter after opening the room
+- `GET /api/appointments/:appointmentId/consultation` — assigned Doctor reads active or finished clinical content
+- `PATCH /api/appointments/:appointmentId/consultation` — assigned Doctor transactionally saves an active clinical draft
 - `POST /api/appointments/:appointmentId/no-show` — assigned Doctor manually records no-show from T+15 onward
 - `POST /api/appointments/:appointmentId/consultation/finish` — assigned Doctor finishes an active consultation
 - `POST /api/appointments/:appointmentId/video-token` — owning Patient or assigned Doctor obtains short-lived JaaS join authorization
@@ -139,11 +141,28 @@ Appointment Details now presents the pre-consultation workflow from the
 backend-derived lifecycle capabilities: Patient check-in and waiting, Doctor
 room opening, a compact browser-only camera/microphone check, authorized room
 entry, participant-presence feedback, explicit Doctor confirmation before
-beginning the Consultation, and manual no-show confirmation. It does not yet
-include the clinical workspace, notes, prescriptions, follow-up, or Finish UI.
+beginning the Consultation, and manual no-show confirmation.
+
+## Active consultation clinical workspace
+
+After the assigned Doctor explicitly begins a Consultation, Appointment Details
+provides the active video experience alongside a compact clinical workspace.
+The Doctor can explicitly save plain consultation notes, zero or more structured
+prescription items, and one optional follow-up interval. Draft saving replaces
+the complete clinical draft transactionally while the Consultation remains
+active; it does not autosave or use browser storage.
+
+The existing Finish endpoint remains the only completion mechanism. Unsaved
+changes are saved before Finish, and a failed save prevents completion. Finish
+atomically sets `consultations.finished_at`, moves the appointment to
+`completed`, and derives any follow-up target from that completion timestamp.
+The assigned Doctor can revisit the resulting clinical record read-only.
+Patients continue to receive only the active consultation/video experience;
+unfinished Doctor clinical content is not exposed to Patient or Admin accounts.
 
 ## Known exclusions
 
-This milestone does not implement payments, the complete video consultation
-UX, clinical notes, prescriptions, medical history, follow-ups, consultation
-workflow interfaces, administration tools, or email/SMS notifications.
+This milestone does not implement the polished Patient post-consultation
+record, consent/history-sharing UI, follow-up booking, patient uploads,
+marketplace or content extras, payments, reviews, AI medical functionality,
+administration tools, or email/SMS notifications.

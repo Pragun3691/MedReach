@@ -12,6 +12,8 @@
     "migrate:down": "node --env-file=.env ./node_modules/node-pg-migrate/bin/node-pg-migrate.js down",
     "verify:auth-schema": "node --env-file=.env scripts/verify-auth-schema.js",
     "verify:booking-schema": "node --env-file=.env scripts/verify-booking-schema.js",
+    "verify:consultation-schema": "node --env-file=.env scripts/verify-booking-schema.js",
+    "report:clinical-counts": "node --env-file=.env scripts/report-clinical-counts.js",
     "seed:public-discovery": "node --env-file=.env scripts/seed-public-discovery.js",
     "test": "vitest run",
     "test:watch": "vitest"

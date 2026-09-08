@@ -261,8 +261,38 @@ export function createBookingTestContext({
       if (appointment.status !== 'booked' || existing || !appointment.roomOpenedAt || new Date(now) < opensAt || new Date(now) >= new Date(slot.endAt)) {
         throw new AppointmentDataError('CONSULTATION_NOT_BEGINNABLE')
       }
-      consultations.push({ id: 9000 + consultations.length, appointmentId: appointment.id, startedAt: new Date(now).toISOString(), finishedAt: null })
+      consultations.push({ id: 9000 + consultations.length, appointmentId: appointment.id, startedAt: new Date(now).toISOString(), finishedAt: null, notes: '', prescriptionItems: [], followUp: null })
       return rowFor(appointment)
+    },
+
+    async getClinicalWorkspace({ appointmentId, doctorId }) {
+      const appointment = appointments.find(item => item.id === Number(appointmentId))
+      const consultation = consultations.find(item => item.appointmentId === Number(appointmentId))
+      if (!appointment || !consultation) throw new AppointmentDataError('CLINICAL_WORKSPACE_UNAVAILABLE')
+      if (slotById(appointment.slotId).doctorId !== doctorId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      return {
+        id: consultation.id,
+        started_at: consultation.startedAt,
+        finished_at: consultation.finishedAt,
+        notes: consultation.notes,
+        prescription_items: consultation.prescriptionItems.map((item, index) => ({ id: consultation.id * 100 + index, ...item })),
+        follow_up_interval: consultation.followUp?.interval ?? null,
+        follow_up_unit: consultation.followUp?.unit ?? null,
+        follow_up_target_at: consultation.followUp?.targetAt ?? null,
+        appointment_status: appointment.status,
+      }
+    },
+
+    async saveClinicalDraft({ appointmentId, doctorId, draft }) {
+      const appointment = appointments.find(item => item.id === Number(appointmentId))
+      if (!appointment) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
+      if (slotById(appointment.slotId).doctorId !== doctorId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      const consultation = consultations.find(item => item.appointmentId === appointment.id)
+      if (appointment.status !== 'booked' || !consultation || consultation.finishedAt) throw new AppointmentDataError('CLINICAL_WORKSPACE_LOCKED')
+      consultation.notes = draft.notes
+      consultation.prescriptionItems = draft.prescriptionItems.map(item => ({ ...item }))
+      consultation.followUp = draft.followUp ? { ...draft.followUp, targetAt: null } : null
+      return this.getClinicalWorkspace({ appointmentId, doctorId })
     },
 
     async markNoShow({ appointmentId, doctorId, now }) {
@@ -290,6 +320,10 @@ export function createBookingTestContext({
       if (appointment.status === 'completed' && consultation?.finishedAt) return rowFor(appointment)
       if (appointment.status !== 'booked' || !consultation || consultation.finishedAt) throw new AppointmentDataError('CONSULTATION_NOT_FINISHABLE')
       consultation.finishedAt = new Date(now).toISOString()
+      if (consultation.followUp) {
+        const days = consultation.followUp.interval * (consultation.followUp.unit === 'weeks' ? 7 : 1)
+        consultation.followUp.targetAt = new Date(new Date(now).getTime() + days * 24 * 60 * 60 * 1000).toISOString()
+      }
       appointment.status = 'completed'
       appointment.updatedAt = consultation.finishedAt
       return rowFor(appointment)

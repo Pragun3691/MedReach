@@ -1,6 +1,6 @@
 import { closePool, getPool } from '../src/db/pool.js'
 
-const requiredTables = ['appointments', 'consultations', 'notifications']
+const requiredTables = ['appointments', 'consultations', 'consultation_prescription_items', 'notifications']
 const requiredColumns = [
   'appointments.ready_at',
   'appointments.room_opened_at',
@@ -10,6 +10,17 @@ const requiredColumns = [
   'consultations.finished_at',
   'consultations.created_at',
   'consultations.updated_at',
+  'consultations.notes',
+  'consultations.follow_up_interval',
+  'consultations.follow_up_unit',
+  'consultations.follow_up_target_at',
+  'consultation_prescription_items.consultation_id',
+  'consultation_prescription_items.position',
+  'consultation_prescription_items.medicine_name',
+  'consultation_prescription_items.dosage',
+  'consultation_prescription_items.frequency',
+  'consultation_prescription_items.duration',
+  'consultation_prescription_items.instructions',
 ]
 const requiredConstraints = [
   'appointments_pkey',
@@ -28,6 +39,12 @@ const requiredConstraints = [
   'consultations_appointment_id_fkey',
   'consultations_one_per_appointment',
   'consultations_finish_after_start',
+  'consultations_notes_length',
+  'consultations_follow_up_complete',
+  'consultation_prescription_items_pkey',
+  'consultation_prescription_items_consultation_id_fkey',
+  'consultation_prescription_position_unique',
+  'consultation_prescription_position_nonnegative',
 ]
 const requiredIndexes = [
   'appointments_patient_status_idx',
@@ -36,6 +53,7 @@ const requiredIndexes = [
   'appointments_reschedule_replacement_unique',
   'notifications_recipient_read_created_idx',
   'consultations_one_per_appointment',
+  'consultation_prescription_items_consultation_id_index',
 ]
 
 function missing(required, actual) {
@@ -80,7 +98,7 @@ try {
       `SELECT indexname, indexdef
        FROM pg_indexes
        WHERE schemaname = 'public'
-         AND tablename IN ('appointments', 'consultations', 'notifications')
+         AND tablename IN ('appointments', 'consultations', 'consultation_prescription_items', 'notifications')
        ORDER BY indexname`,
     ),
     database.query(
@@ -90,6 +108,8 @@ try {
          (SELECT COUNT(*)::int FROM slots) AS slots,
          (SELECT COUNT(*)::int FROM appointments) AS appointments,
          (SELECT COUNT(*)::int FROM consultations) AS consultations,
+         (SELECT COUNT(*)::int FROM consultation_prescription_items) AS prescription_items,
+         (SELECT COUNT(*)::int FROM consultations WHERE follow_up_interval IS NOT NULL) AS follow_ups,
          (SELECT COUNT(*)::int FROM notifications) AS notifications,
          (SELECT md5(COALESCE(string_agg(row_to_json(appointment_row)::text, '|' ORDER BY appointment_row.id), ''))
           FROM appointments appointment_row) AS appointment_row_fingerprint`,
@@ -144,7 +164,7 @@ try {
   }
 
   if (missingItems.length > 0) {
-    throw new Error(`Missing booking schema requirements: ${missingItems.join(', ')}`)
+    throw new Error(`Missing MedReach schema requirements: ${missingItems.join(', ')}`)
   }
 
   console.log(JSON.stringify({

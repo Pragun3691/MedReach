@@ -113,6 +113,21 @@ export function beginAppointmentConsultation(appointmentId) {
   return requestJson(`/api/appointments/${appointmentId}/begin-consultation`, { method: 'POST' })
 }
 
+export function getAppointmentConsultation(appointmentId, signal) {
+  return requestJson(`/api/appointments/${appointmentId}/consultation`, { signal })
+}
+
+export function saveAppointmentConsultation(appointmentId, draft) {
+  return requestJson(`/api/appointments/${appointmentId}/consultation`, {
+    method: 'PATCH',
+    body: JSON.stringify(draft),
+  })
+}
+
+export function finishAppointmentConsultation(appointmentId) {
+  return requestJson(`/api/appointments/${appointmentId}/consultation/finish`, { method: 'POST' })
+}
+
 export function markAppointmentNoShow(appointmentId) {
   return requestJson(`/api/appointments/${appointmentId}/no-show`, { method: 'POST' })
 }

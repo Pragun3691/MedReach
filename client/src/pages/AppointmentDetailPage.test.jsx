@@ -9,7 +9,7 @@ import { AppointmentDetailPage } from './AppointmentDetailPage.jsx'
 
 const api = vi.hoisted(() => ({
   beginAppointmentConsultation: vi.fn(), cancelAppointment: vi.fn(), getAppointment: vi.fn(),
-  getAppointmentVideoSession: vi.fn(), markAppointmentNoShow: vi.fn(), markAppointmentReady: vi.fn(), openAppointmentRoom: vi.fn(),
+  finishAppointmentConsultation: vi.fn(), getAppointmentConsultation: vi.fn(), getAppointmentVideoSession: vi.fn(), markAppointmentNoShow: vi.fn(), markAppointmentReady: vi.fn(), openAppointmentRoom: vi.fn(), saveAppointmentConsultation: vi.fn(),
 }))
 vi.mock('../lib/api.js', () => api)
 vi.mock('../components/PublicHeader.jsx', () => ({ PublicHeader: () => null }))
@@ -53,6 +53,7 @@ beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime('2030-01-01T09:56:00.000Z')
   Object.values(api).forEach(mock => mock.mockReset())
   api.markAppointmentReady.mockResolvedValue({}); api.openAppointmentRoom.mockResolvedValue({}); api.beginAppointmentConsultation.mockResolvedValue({}); api.markAppointmentNoShow.mockResolvedValue({})
+  api.finishAppointmentConsultation.mockResolvedValue({}); api.saveAppointmentConsultation.mockResolvedValue({})
   api.getAppointmentVideoSession.mockResolvedValue({ domain: '8x8.vc', roomName: 'test-app/medreach-appointment-42', jwt: 'memory-only-token', role: 'doctor' })
 })
 afterEach(() => { vi.useRealTimers(); document.body.replaceChildren() })
@@ -147,7 +148,16 @@ describe('Appointment pre-consultation experience', () => {
     expect(host.textContent).toContain('This patient marked themselves ready at')
     await click(button(host, 'Cancel'))
     await click(button(host, 'Enter consultation room')); await click([...host.querySelectorAll('button')].filter(item => item.textContent.includes('Join consultation')).at(-1)); await click(button(host, 'Simulate conference leave'))
-    expect(api.beginAppointmentConsultation).not.toHaveBeenCalled(); expect(api.markAppointmentNoShow).not.toHaveBeenCalled(); expect(host.querySelector('[data-testid="jaas-meeting"]')).toBeNull()
+    expect(api.beginAppointmentConsultation).not.toHaveBeenCalled(); expect(api.finishAppointmentConsultation).not.toHaveBeenCalled(); expect(api.markAppointmentNoShow).not.toHaveBeenCalled(); expect(host.querySelector('[data-testid="jaas-meeting"]')).toBeNull()
+    await act(async () => root.unmount())
+  })
+
+  it('never requests or renders the Doctor clinical workspace for a Patient in an active consultation', async () => {
+    const active = appointment({ roomOpenedAt: '2030-01-01T09:55:00.000Z', consultationId: 9000, consultationStartedAt: '2030-01-01T09:56:00.000Z', canCancel: false, canReschedule: false })
+    const { host, root } = await renderPage(patient, [active])
+    expect(api.getAppointmentConsultation).not.toHaveBeenCalled()
+    expect(host.textContent).not.toContain('Clinical workspace')
+    expect(host.querySelector('#consultation-notes')).toBeNull()
     await act(async () => root.unmount())
   })
 })
