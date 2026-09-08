@@ -77,7 +77,7 @@ Doctor profiles remain private until their verification is approved.
 - `POST /api/appointments/:appointmentId/ready` — owning Patient marks Ready from T-15 until slot end
 - `POST /api/appointments/:appointmentId/open-room` — assigned Doctor opens the room from T-5 until slot end
 - `POST /api/appointments/:appointmentId/begin-consultation` — assigned Doctor begins the clinical encounter after opening the room
-- `GET /api/appointments/:appointmentId/consultation` — assigned Doctor reads active or finished clinical content
+- `GET /api/appointments/:appointmentId/consultation` — assigned Doctor reads active/finished content; owning Patient reads only completed content
 - `PATCH /api/appointments/:appointmentId/consultation` — assigned Doctor transactionally saves an active clinical draft
 - `POST /api/appointments/:appointmentId/no-show` — assigned Doctor manually records no-show from T+15 onward
 - `POST /api/appointments/:appointmentId/consultation/finish` — assigned Doctor finishes an active consultation
@@ -160,9 +160,24 @@ The assigned Doctor can revisit the resulting clinical record read-only.
 Patients continue to receive only the active consultation/video experience;
 unfinished Doctor clinical content is not exposed to Patient or Admin accounts.
 
+## Patient post-consultation record
+
+An owning Patient can open a completed appointment and read its finished
+Consultation record. Appointment Details presents the Doctor’s plain-text notes,
+the structured prescription in stored order, and the optional follow-up interval
+and server-derived target date. Empty notes, prescription, and follow-up states
+are explained calmly only when a real finished Consultation exists.
+
+When follow-up was recommended, the record links to the same Doctor’s existing
+availability flow with the target calendar date preselected. This remains a
+normal Patient-selected booking: MedReach does not create a follow-up
+appointment or reserve a slot automatically. Active clinical drafts remain
+private to the assigned Doctor, PATCH and Finish remain Doctor-only, and Admin
+accounts have no clinical access.
+
 ## Known exclusions
 
 This milestone does not implement the polished Patient post-consultation
-record, consent/history-sharing UI, follow-up booking, patient uploads,
+history-sharing/consent UI, follow-up progress notes, patient uploads,
 marketplace or content extras, payments, reviews, AI medical functionality,
 administration tools, or email/SMS notifications.

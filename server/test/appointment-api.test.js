@@ -640,6 +640,7 @@ describe('consultation clinical workspace API', () => {
   let context
   let app
   let patient
+  let otherPatient
   let doctor
   let otherDoctor
   let admin
@@ -654,6 +655,7 @@ describe('consultation clinical workspace API', () => {
     slot.endAt = '2030-01-01T01:30:00.000Z'
     app = createApp(context.services)
     patient = await login(app, 'patient@example.test')
+    otherPatient = await login(app, 'other-patient@example.test')
     doctor = await login(app, 'doctor@example.test')
     otherDoctor = await login(app, 'other-doctor@example.test')
     admin = await login(app, 'admin@example.test')
@@ -722,9 +724,33 @@ describe('consultation clinical workspace API', () => {
     const finish = await doctor.post(`/api/appointments/${appointmentId}/consultation/finish`)
     const lateSave = await doctor.patch(`/api/appointments/${appointmentId}/consultation`).send({ ...draft, notes: 'Late mutation' })
     const record = await doctor.get(`/api/appointments/${appointmentId}/consultation`)
+    const patientRecord = await patient.get(`/api/appointments/${appointmentId}/consultation`)
     expect(finish.body.appointment.status).toBe('completed')
     expect(lateSave.status).toBe(409)
     expect(record.body.consultation).toMatchObject({ notes: draft.notes, editable: false, followUp: { interval: 2, unit: 'weeks', targetAt: '2030-01-15T02:00:00.000Z' } })
+    expect(patientRecord.status).toBe(200)
+    expect(patientRecord.body.consultation).toMatchObject({
+      notes: draft.notes,
+      prescriptionItems: draft.prescriptionItems,
+      followUp: { interval: 2, unit: 'weeks', targetAt: '2030-01-15T02:00:00.000Z' },
+      editable: false,
+    })
+  })
+
+  it('allows only the owning Patient to read a finished record while preserving all write boundaries', async () => {
+    await doctor.patch(`/api/appointments/${appointmentId}/consultation`).send(draft)
+    currentTime = new Date('2030-01-01T02:00:00.000Z')
+    await doctor.post(`/api/appointments/${appointmentId}/consultation/finish`)
+    const responses = await Promise.all([
+      patient.get(`/api/appointments/${appointmentId}/consultation`),
+      otherPatient.get(`/api/appointments/${appointmentId}/consultation`),
+      otherDoctor.get(`/api/appointments/${appointmentId}/consultation`),
+      admin.get(`/api/appointments/${appointmentId}/consultation`),
+      request(app).get(`/api/appointments/${appointmentId}/consultation`),
+      patient.patch(`/api/appointments/${appointmentId}/consultation`).send(draft),
+      patient.post(`/api/appointments/${appointmentId}/consultation/finish`),
+    ])
+    expect(responses.map(response => response.status)).toEqual([200, 403, 403, 403, 401, 403, 403])
   })
 
   it('does not expose a consultation-id request field as an authorization bypass', async () => {

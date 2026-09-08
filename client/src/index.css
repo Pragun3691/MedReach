@@ -1400,6 +1400,27 @@ select {
 .clinical-workspace__actions { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; border-top: 1px solid rgba(15, 39, 71, 0.14); background: #f2eee5; padding: 0.8rem 1.15rem; }
 .clinical-workspace__actions > span { color: #66756f; font-size: 0.72rem; font-weight: 700; }
 .clinical-workspace__actions > div { display: flex; gap: 0.55rem; }
+.patient-consultation-record { border: 1px solid rgba(15, 39, 71, 0.16); background: #fffdf9; color: #0f2747; }
+.patient-consultation-record__header { border-bottom: 1px solid rgba(15, 39, 71, 0.13); background: #f2eee5; padding: 1.4rem 1.5rem; }
+.patient-consultation-record__header > p, .patient-record-section__eyebrow { color: #2c7a68; font-size: 0.66rem; font-weight: 760; letter-spacing: 0.14em; text-transform: uppercase; }
+.patient-consultation-record__header h2 { margin-top: 0.3rem; font-size: clamp(1.45rem, 2.5vw, 2rem); font-weight: 640; letter-spacing: -0.04em; }
+.patient-consultation-record__header span { display: block; margin-top: 0.5rem; color: #5b6b66; font-size: 0.82rem; line-height: 1.55; }
+.patient-record-section { padding: 1.4rem 1.5rem 1.6rem; }
+.patient-record-section + .patient-record-section { border-top: 1px solid rgba(15, 39, 71, 0.12); }
+.patient-record-section h3 { margin-top: 0.32rem; font-size: 1.08rem; font-weight: 650; letter-spacing: -0.02em; }
+.patient-record-notes, .patient-record-empty, .patient-record-follow-up > p { margin-top: 0.8rem; color: #52645f; font-size: 0.84rem; line-height: 1.7; white-space: pre-wrap; }
+.patient-record-empty { color: #71807b; }
+.patient-prescription-list { margin-top: 0.9rem; }
+.patient-prescription-item { display: grid; grid-template-columns: minmax(10rem, 0.75fr) minmax(0, 1.8fr); gap: 1rem 2rem; padding: 1rem 0; }
+.patient-prescription-item + .patient-prescription-item { border-top: 1px solid rgba(15, 39, 71, 0.12); }
+.patient-prescription-item > div > span, .patient-prescription-item dt { color: #71807b; font-size: 0.65rem; font-weight: 740; letter-spacing: 0.09em; text-transform: uppercase; }
+.patient-prescription-item h4 { margin-top: 0.25rem; font-size: 1rem; font-weight: 680; }
+.patient-prescription-item dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem 1.2rem; }
+.patient-prescription-item dd { margin-top: 0.2rem; color: #425751; font-size: 0.8rem; line-height: 1.45; }
+.patient-record-follow-up__target strong { color: #214f45; }
+.patient-record-follow-up a { display: inline-flex; min-height: 2.75rem; align-items: center; gap: 0.45rem; margin-top: 1rem; border: 1px solid #174e43; border-radius: 0.38rem; padding: 0.6rem 0.9rem; color: #174e43; font-size: 0.8rem; font-weight: 720; text-decoration: none; }
+.patient-record-follow-up a:hover { background: #e7efeb; }
+.patient-record-follow-up small { display: block; margin-top: 0.55rem; color: #78847f; font-size: 0.7rem; }
 .appointment-detail-loading { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(19rem, 0.9fr); gap: 4.5rem; margin-top: 3.6rem; }
 .appointment-detail-loading div { height: 28rem; border: 1px solid #e0dbd2; border-radius: 0.7rem; background: #fffdf9; }
 .appointment-detail-error { margin-top: 3rem; border-top: 1px solid #dfc4bc; border-bottom: 1px solid #dfc4bc; padding: 2.2rem 0; text-align: center; }
@@ -1444,6 +1465,10 @@ select {
   .follow-up-fields { grid-template-columns: minmax(0, 1fr) 4.7rem minmax(0, 1fr); }
   .clinical-workspace__actions { align-items: stretch; flex-direction: column; }
   .clinical-workspace__actions > div { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .patient-consultation-record__header, .patient-record-section { padding-right: 1rem; padding-left: 1rem; }
+  .patient-prescription-item { grid-template-columns: minmax(0, 1fr); gap: 0.75rem; }
+  .patient-prescription-item dl { grid-template-columns: minmax(0, 1fr); }
+  .patient-record-follow-up a { width: 100%; justify-content: center; }
 }
 
 @media (min-width: 640px) and (max-width: 1023px) {

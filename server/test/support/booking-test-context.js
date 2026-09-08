@@ -265,11 +265,13 @@ export function createBookingTestContext({
       return rowFor(appointment)
     },
 
-    async getClinicalWorkspace({ appointmentId, doctorId }) {
+    async getClinicalWorkspace({ appointmentId, userId, userRole }) {
       const appointment = appointments.find(item => item.id === Number(appointmentId))
       const consultation = consultations.find(item => item.appointmentId === Number(appointmentId))
       if (!appointment || !consultation) throw new AppointmentDataError('CLINICAL_WORKSPACE_UNAVAILABLE')
-      if (slotById(appointment.slotId).doctorId !== doctorId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      const isAssignedDoctor = userRole === 'doctor' && slotById(appointment.slotId).doctorId === userId
+      const isFinishedOwner = userRole === 'patient' && appointment.patientId === userId && appointment.status === 'completed' && Boolean(consultation.finishedAt)
+      if (!isAssignedDoctor && !isFinishedOwner) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
       return {
         id: consultation.id,
         started_at: consultation.startedAt,
@@ -292,7 +294,7 @@ export function createBookingTestContext({
       consultation.notes = draft.notes
       consultation.prescriptionItems = draft.prescriptionItems.map(item => ({ ...item }))
       consultation.followUp = draft.followUp ? { ...draft.followUp, targetAt: null } : null
-      return this.getClinicalWorkspace({ appointmentId, doctorId })
+      return this.getClinicalWorkspace({ appointmentId, userId: doctorId, userRole: 'doctor' })
     },
 
     async markNoShow({ appointmentId, doctorId, now }) {

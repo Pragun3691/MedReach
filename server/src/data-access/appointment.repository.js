@@ -185,6 +185,7 @@ async function findClinicalWorkspace(client, appointmentId) {
        consultation.follow_up_unit,
        consultation.follow_up_target_at,
        a.status AS appointment_status,
+       a.patient_id,
        ab.doctor_id,
        COALESCE((
          SELECT jsonb_agg(jsonb_build_object(
@@ -292,10 +293,15 @@ export function createAppointmentRepository(databaseProvider = getPool) {
     return findAppointment(databaseProvider(), appointmentId)
   },
 
-  async getClinicalWorkspace({ appointmentId, doctorId }) {
+  async getClinicalWorkspace({ appointmentId, userId, userRole }) {
     const workspace = await findClinicalWorkspace(databaseProvider(), appointmentId)
     if (!workspace) throw new AppointmentDataError('CLINICAL_WORKSPACE_UNAVAILABLE')
-    if (Number(workspace.doctor_id) !== doctorId) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+    const isAssignedDoctor = userRole === 'doctor' && Number(workspace.doctor_id) === userId
+    const isFinishedOwner = userRole === 'patient'
+      && Number(workspace.patient_id) === userId
+      && workspace.appointment_status === 'completed'
+      && Boolean(workspace.finished_at)
+    if (!isAssignedDoctor && !isFinishedOwner) throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
     return workspace
   },
 

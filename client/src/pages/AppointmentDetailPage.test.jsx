@@ -160,4 +160,33 @@ describe('Appointment pre-consultation experience', () => {
     expect(host.querySelector('#consultation-notes')).toBeNull()
     await act(async () => root.unmount())
   })
+
+  it('fetches and renders a finished consultation record for the owning Patient', async () => {
+    const completed = appointment({ consultationId: 9000, consultationStartedAt: '2030-01-01T09:56:00.000Z', consultationFinishedAt: '2030-01-01T10:30:00.000Z', canCancel: false, canReschedule: false }, 'completed')
+    api.getAppointmentConsultation.mockResolvedValue({ consultation: { consultationId: 9000, startedAt: '2030-01-01T09:56:00.000Z', finishedAt: '2030-01-01T10:30:00.000Z', notes: 'Completed guidance', prescriptionItems: [], followUp: null, editable: false } })
+    const { host, root } = await renderPage(patient, [completed])
+    expect(api.getAppointmentConsultation).toHaveBeenCalledWith(42, expect.any(AbortSignal))
+    expect(host.textContent).toContain('Consultation record')
+    expect(host.textContent).toContain('Completed guidance')
+    expect(button(host, 'Join consultation')).toBeUndefined()
+    expect(button(host, 'Save changes')).toBeUndefined()
+    await act(async () => root.unmount())
+  })
+
+  it('handles an unavailable completed record calmly', async () => {
+    const completed = appointment({ consultationId: 9000, consultationStartedAt: '2030-01-01T09:56:00.000Z', consultationFinishedAt: '2030-01-01T10:30:00.000Z' }, 'completed')
+    api.getAppointmentConsultation.mockRejectedValue(new Error('database detail'))
+    const { host, root } = await renderPage(patient, [completed])
+    expect(host.textContent).toContain('We couldn’t load this consultation record. Please try again later.')
+    expect(host.textContent).not.toContain('database detail')
+    await act(async () => root.unmount())
+  })
+
+  it('does not fabricate a record for a historical appointment without a Consultation', async () => {
+    const { host, root } = await renderPage(patient, [appointment({}, 'completed')])
+    expect(api.getAppointmentConsultation).not.toHaveBeenCalled()
+    expect(host.textContent).not.toContain('Consultation record')
+    expect(host.textContent).not.toContain('No medicines were prescribed')
+    await act(async () => root.unmount())
+  })
 })

@@ -241,9 +241,9 @@ export function createAppointmentService(repository = appointmentRepository, clo
       }
     },
 
-    async getClinicalWorkspace(appointmentId, doctor) {
+    async getClinicalWorkspace(appointmentId, user) {
       try {
-        return mapClinicalWorkspace(await repository.getClinicalWorkspace({ appointmentId, doctorId: doctor.id }))
+        return mapClinicalWorkspace(await repository.getClinicalWorkspace({ appointmentId, userId: user.id, userRole: user.role }))
       } catch (error) {
         translateDataError(error)
       }
