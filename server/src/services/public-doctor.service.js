@@ -1,5 +1,9 @@
 import { publicDoctorRepository } from '../data-access/public-doctor.repository.js'
 import { AppError } from '../errors/app-error.js'
+import {
+  normalizeDoctorName,
+  resolveSpecializationQuery,
+} from './doctor-search.js'
 
 function optionalNumber(value) {
   return value === null ? null : Number(value)
@@ -30,7 +34,38 @@ function mapDoctor(row) {
 export function createPublicDoctorService(repository = publicDoctorRepository) {
   return {
     async search(filters) {
-      const result = await repository.search(filters)
+      const resolvedFilters = { ...filters }
+      let vocabulary
+
+      async function getVocabulary() {
+        vocabulary ??= (await repository.findSearchVocabulary()).map(item => ({
+          specializationId: Number(item.specialization_id),
+          name: item.name,
+          terms: item.terms,
+        }))
+        return vocabulary
+      }
+
+      if (filters.name) resolvedFilters.name = normalizeDoctorName(filters.name)
+      if (filters.q) {
+        const specializationMatch = resolveSpecializationQuery(
+          filters.q,
+          await getVocabulary(),
+        )
+        resolvedFilters.qName = normalizeDoctorName(filters.q)
+        resolvedFilters.qSpecializationIds = specializationMatch.specializationIds
+        resolvedFilters.qSpecializationKind = specializationMatch.kind
+      }
+      for (const field of ['specialization', 'problem']) {
+        if (!filters[field]) continue
+        const matchField = field === 'specialization' ? 'specializationIds' : 'problemSpecializationIds'
+        resolvedFilters[matchField] = resolveSpecializationQuery(
+          filters[field],
+          await getVocabulary(),
+        ).specializationIds
+      }
+
+      const result = await repository.search(resolvedFilters)
 
       return {
         items: result.rows.map(mapDoctor),

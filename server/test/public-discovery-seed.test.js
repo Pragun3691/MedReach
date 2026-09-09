@@ -38,4 +38,19 @@ describe('public discovery seed fixtures', () => {
       expect(endHour - startHour).toBe(2)
     }
   })
+
+  it('keeps required multilingual aliases normalized without losing existing concerns', () => {
+    const dermatology = specializationSeeds.find(item => item.name === 'Dermatology')
+    expect(dermatology.terms).toEqual(expect.arrayContaining([
+      'rash', 'acne', 'itching', 'dermatologist', 'skin doctor', 'skin specialist',
+      'दाने', 'खुजली', 'त्वचा', 'daane', 'khujli', 'twacha',
+    ]))
+
+    for (const specialization of specializationSeeds) {
+      expect(new Set(specialization.terms).size).toBe(specialization.terms.length)
+      for (const term of specialization.terms) {
+        expect(term).toBe(term.normalize('NFC').toLowerCase().trim().replace(/\s+/gu, ' '))
+      }
+    }
+  })
 })

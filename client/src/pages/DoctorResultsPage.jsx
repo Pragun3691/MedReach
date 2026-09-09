@@ -7,22 +7,23 @@ import { PublicFooter } from '../components/PublicFooter.jsx'
 import { PublicHeader } from '../components/PublicHeader.jsx'
 import { listSpecializations, searchDoctors } from '../lib/api.js'
 import { todayInIndia } from '../lib/date.js'
+import { useLanguage } from '../hooks/useLanguage.js'
 
 const pageSize = 10
 const filterKeys = ['specialization', 'date', 'maxFee', 'minExperience']
-const apiKeys = ['name', 'specialization', 'problem', ...filterKeys.slice(1)]
+const apiKeys = ['q', 'name', 'specialization', 'problem', ...filterKeys.slice(1)]
 
 function currentSearch(searchParams) {
-  for (const type of ['problem', 'specialization', 'name']) {
+  for (const type of ['q', 'problem', 'specialization', 'name']) {
     const value = searchParams.get(type)
     if (value) return { type, value }
   }
   return { type: 'problem', value: '' }
 }
 
-function ResultsSkeleton() {
+function ResultsSkeleton({ t }) {
   return (
-    <div className="doctor-results-list" aria-label="Loading doctors">
+    <div className="doctor-results-list" aria-label={t('results.finding')}>
       {[1, 2, 3].map(item => (
         <div className="doctor-result doctor-result--skeleton animate-pulse" key={item}>
           <div className="doctor-result__portrait bg-[#DCE8E2]" />
@@ -45,6 +46,7 @@ function ResultsSkeleton() {
 }
 
 export function DoctorResultsPage() {
+  const { locale, t } = useLanguage()
   const [searchParams, setSearchParams] = useSearchParams()
   const [requestVersion, setRequestVersion] = useState(0)
   const [resultState, setResultState] = useState({ key: null, data: null, error: null })
@@ -141,22 +143,22 @@ export function DoctorResultsPage() {
       <main>
         <section className="doctor-discovery-intro">
           <div className="doctor-discovery-intro__inner mx-auto max-w-7xl px-5 py-9 sm:px-8 sm:py-12 lg:px-10 lg:py-14">
-            <nav className="doctor-discovery-breadcrumb text-sm" aria-label="Breadcrumb">
-              <Link className="rounded-sm transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A8E6CF] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B223B]" to="/">Home</Link>
+            <nav className="doctor-discovery-breadcrumb text-sm" aria-label={t('results.breadcrumb')}>
+              <Link className="rounded-sm transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#A8E6CF] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B223B]" to="/">{t('common.home')}</Link>
               <span className="mx-2.5" aria-hidden="true">/</span>
-              <span>Find doctors</span>
+              <span>{t('navigation.findDoctors')}</span>
             </nav>
 
             <div className="mt-5 max-w-3xl">
-              <p className="editorial-eyebrow">Find care</p>
-              <h1 className="mt-4 text-[2.75rem] font-medium leading-[1.02] tracking-[-0.05em] text-[#F9F7F1] sm:text-[3.8rem]">Find a doctor</h1>
+              <p className="editorial-eyebrow">{t('results.findCare')}</p>
+              <h1 className="mt-4 text-[2.75rem] font-medium leading-[1.02] tracking-[-0.05em] text-[#F9F7F1] sm:text-[3.8rem]">{t('results.title')}</h1>
               <p className="mt-4 max-w-2xl text-base leading-7 text-white/65 sm:text-lg">
-                Search verified doctors by specialization, professional details and real availability.
+                {t('results.copy')}
               </p>
             </div>
 
             <div className="max-w-5xl sm:mt-1">
-              <DiscoverySearch className="mt-7" initialQuery={searchIntent.value} initialType={searchIntent.type} key={`${searchIntent.type}:${searchIntent.value}`} />
+              <DiscoverySearch className="mt-7" initialQuery={searchIntent.value} key={`${searchIntent.type}:${searchIntent.value}`} />
             </div>
           </div>
         </section>
@@ -164,7 +166,7 @@ export function DoctorResultsPage() {
         <section className="doctor-filter-rail">
           <div className="doctor-filter-rail__inner mx-auto max-w-7xl px-5 py-4 sm:px-8 lg:px-10">
             <DoctorFilters filters={filters} minDate={todayInIndia()} onApply={applyFilters} onChange={setFilter} onClear={clearFilters} specializations={specializationState.items} />
-            {specializationState.error && <p className="mt-3 text-sm text-[#80612D]">Specialization options are temporarily unavailable.</p>}
+            {specializationState.error && <p className="mt-3 text-sm text-[#80612D]">{t('results.specializationError')}</p>}
           </div>
         </section>
 
@@ -172,26 +174,26 @@ export function DoctorResultsPage() {
           <div className="results-heading-row">
             <div>
               <p className="results-count">
-                {loading ? 'Finding doctors…' : `${total} ${total === 1 ? 'doctor' : 'doctors'} found`}
+                {loading ? t('results.finding') : t(total === 1 ? 'results.oneFound' : 'results.manyFound', { count: new Intl.NumberFormat(locale).format(total) })}
               </p>
-              {!loading && searchIntent.value && <p className="results-query">Results for <strong>“{searchIntent.value}”</strong></p>}
+              {!loading && searchIntent.value && <p className="results-query">{t('results.forQuery')} <strong>“{searchIntent.value}”</strong></p>}
             </div>
             {!loading && total > 0 && (
               <div className="sort-note">
-                <span>Sort:</span>
-                <strong>Earliest availability first</strong>
+                <span>{t('results.sort')}</span>
+                <strong>{t('results.earliest')}</strong>
               </div>
             )}
           </div>
 
-          {loading && <ResultsSkeleton />}
+          {loading && <ResultsSkeleton t={t} />}
 
           {!loading && error && (
             <div className="results-state" role="alert">
               <span className="results-state__mark" aria-hidden="true">!</span>
-              <h2>We couldn’t load doctors</h2>
+              <h2>{t('results.loadError')}</h2>
               <p>{error}</p>
-              <button onClick={() => setRequestVersion(version => version + 1)} type="button">Try again <span aria-hidden="true">→</span></button>
+              <button onClick={() => setRequestVersion(version => version + 1)} type="button">{t('common.tryAgain')} <span aria-hidden="true">→</span></button>
             </div>
           )}
 
@@ -201,9 +203,9 @@ export function DoctorResultsPage() {
                 <circle cx="11" cy="11" r="7" />
                 <path d="m20 20-3.5-3.5" strokeLinecap="round" />
               </svg>
-              <h2>No doctors match these filters</h2>
-              <p>Try changing your search or filters.</p>
-              <button onClick={clearFilters} type="button">Clear filters <span aria-hidden="true">→</span></button>
+              <h2>{t('results.noMatch')}</h2>
+              <p>{t('results.noMatchCopy')}</p>
+              <button onClick={clearFilters} type="button">{t('results.clearFilters')} <span aria-hidden="true">→</span></button>
             </div>
           )}
 
@@ -214,10 +216,10 @@ export function DoctorResultsPage() {
           )}
 
           {!loading && !error && pageCount > 1 && (
-            <nav className="mt-9 flex items-center justify-center gap-4" aria-label="Doctor results pagination">
-              <button className="pagination-button" disabled={offset === 0} onClick={() => changePage(Math.max(0, offset - pageSize))} type="button">Previous</button>
-              <span className="text-sm text-[#61716B]">Page {pageNumber} of {pageCount}</span>
-              <button className="pagination-button" disabled={offset + pageSize >= total} onClick={() => changePage(offset + pageSize)} type="button">Next</button>
+            <nav className="mt-9 flex items-center justify-center gap-4" aria-label={t('results.pagination')}>
+              <button className="pagination-button" disabled={offset === 0} onClick={() => changePage(Math.max(0, offset - pageSize))} type="button">{t('common.previous')}</button>
+              <span className="text-sm text-[#61716B]">{t('results.page', { page: new Intl.NumberFormat(locale).format(pageNumber), pages: new Intl.NumberFormat(locale).format(pageCount) })}</span>
+              <button className="pagination-button" disabled={offset + pageSize >= total} onClick={() => changePage(offset + pageSize)} type="button">{t('common.next')}</button>
             </nav>
           )}
         </section>

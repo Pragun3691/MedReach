@@ -1,27 +1,27 @@
 export const specializationSeeds = [
   {
     name: 'General Medicine',
-    terms: ['blood pressure', 'cold', 'cough', 'diabetes', 'fatigue', 'fever', 'headache'],
+    terms: ['blood pressure', 'bukhar', 'cold', 'cough', 'diabetes', 'fatigue', 'fever', 'general physician', 'headache', 'khansi', 'physician', 'sir dard', 'खांसी', 'बुखार', 'सिरदर्द'],
   },
   {
     name: 'Dermatology',
-    terms: ['acne', 'hair loss', 'itching', 'rash', 'skin infection'],
+    terms: ['acne', 'daane', 'dermatologist', 'hair loss', 'itching', 'khujli', 'rash', 'skin doctor', 'skin infection', 'skin specialist', 'twacha', 'खुजली', 'त्वचा', 'दाने'],
   },
   {
     name: 'Cardiology',
-    terms: ['chest pain', 'high blood pressure', 'palpitations'],
+    terms: ['cardiologist', 'chest pain', 'dil', 'heart doctor', 'heart specialist', 'high blood pressure', 'hriday', 'palpitations', 'दिल', 'हृदय'],
   },
   {
     name: 'Pediatrics',
-    terms: ['child cough', 'child fever', 'child health', 'vaccination'],
+    terms: ['bachchon ka doctor', 'bal rog', 'child cough', 'child doctor', 'child fever', 'child health', 'paediatrician', 'pediatrician', 'vaccination', 'बाल रोग'],
   },
   {
     name: 'Psychiatry',
-    terms: ['anxiety', 'depression', 'sleep problems', 'stress'],
+    terms: ['anxiety', 'chinta', 'depression', 'mansik swasthya', 'mental health doctor', 'psychiatrist', 'sleep problems', 'stress', 'चिंता', 'मानसिक स्वास्थ्य'],
   },
   {
     name: 'Gynecology',
-    terms: ['menstrual problems', 'pelvic pain', 'pregnancy consultation'],
+    terms: ['gynaecologist', 'gynecologist', 'mahila swasthya', 'menstrual problems', 'pelvic pain', 'pregnancy consultation', 'stri rog', "women's health doctor", 'महिला स्वास्थ्य', 'स्त्री रोग'],
   },
 ]
 
