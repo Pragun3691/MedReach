@@ -6,6 +6,8 @@ import { PublicHeader } from '../components/PublicHeader.jsx'
 import { getDoctor } from '../lib/api.js'
 import { isCalendarDate, isoToIndiaDate, todayInIndia } from '../lib/date.js'
 import { resolveDoctorPortrait } from '../lib/doctor-portraits.js'
+import { useLanguage } from '../hooks/useLanguage.js'
+import { specializationDisplayName } from '../i18n/messages.js'
 
 function initials(name) {
   return name
@@ -28,18 +30,18 @@ function ProfileSkeleton() {
   )
 }
 
-function ProfileError({ notFound, onRetry }) {
+function ProfileError({ notFound, onRetry, t }) {
   return (
     <main className="grid min-h-[70vh] place-items-center bg-slate-50 px-5 text-center">
       <div className="max-w-md">
         <div className="mx-auto grid size-12 place-items-center rounded-full bg-blue-50 text-blue-700" aria-hidden="true">+</div>
-        <h1 className="mt-4 text-2xl font-semibold text-slate-950">{notFound ? 'Doctor profile not found' : 'We couldn’t load this profile'}</h1>
+        <h1 className="mt-4 text-2xl font-semibold text-slate-950">{notFound ? t('profile.notFound') : t('profile.loadError')}</h1>
         <p className="mt-2 leading-7 text-slate-600">
-          {notFound ? 'This doctor is unavailable or the profile is no longer public.' : 'Check that the MedReach API is running and try again.'}
+          {notFound ? t('profile.unavailable') : t('profile.apiError')}
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-3">
-          {!notFound && <button className="min-h-11 rounded-lg bg-blue-700 px-5 text-sm font-semibold text-white" onClick={onRetry} type="button">Try again</button>}
-          <Link className="inline-flex min-h-11 items-center rounded-lg border border-blue-700 px-5 text-sm font-semibold text-blue-700" to="/doctors">Find doctors</Link>
+          {!notFound && <button className="min-h-11 rounded-lg bg-blue-700 px-5 text-sm font-semibold text-white" onClick={onRetry} type="button">{t('common.tryAgain')}</button>}
+          <Link className="inline-flex min-h-11 items-center rounded-lg border border-blue-700 px-5 text-sm font-semibold text-blue-700" to="/doctors">{t('navigation.findDoctors')}</Link>
         </div>
       </div>
     </main>
@@ -47,6 +49,7 @@ function ProfileError({ notFound, onRetry }) {
 }
 
 export function DoctorProfilePage() {
+  const { language, locale, t } = useLanguage()
   const { doctorId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const [requestVersion, setRequestVersion] = useState(0)
@@ -112,7 +115,7 @@ export function DoctorProfilePage() {
     return (
       <div className="min-h-screen bg-slate-50">
         <PublicHeader />
-        <ProfileError notFound={error?.status === 404} onRetry={() => setRequestVersion(version => version + 1)} />
+        <ProfileError notFound={error?.status === 404} onRetry={() => setRequestVersion(version => version + 1)} t={t} />
         <PublicFooter />
       </div>
     )
@@ -125,10 +128,10 @@ export function DoctorProfilePage() {
       <PublicHeader />
 
       <main className="doctor-profile-shell">
-        <nav className="doctor-profile-breadcrumb" aria-label="Breadcrumb">
-          <Link to="/">Home</Link>
+        <nav className="doctor-profile-breadcrumb" aria-label={t('profile.breadcrumb')}>
+          <Link to="/">{t('common.home')}</Link>
           <span aria-hidden="true">/</span>
-          <Link to="/doctors">Doctors</Link>
+          <Link to="/doctors">{t('common.doctors')}</Link>
           <span aria-hidden="true">/</span>
           <span>{doctor.fullName}</span>
         </nav>
@@ -137,7 +140,7 @@ export function DoctorProfilePage() {
           <section className="doctor-profile-identity" aria-labelledby="doctor-profile-name">
             <div className="doctor-profile-portrait">
               {portraitUrl
-                ? <img alt={`Portrait of ${doctor.fullName}`} src={portraitUrl} />
+                ? <img alt={t('doctorCard.portrait', { name: doctor.fullName })} src={portraitUrl} />
                 : <span aria-hidden="true">{initials(doctor.fullName)}</span>}
             </div>
             <div className="doctor-profile-identity__copy">
@@ -148,16 +151,16 @@ export function DoctorProfilePage() {
                     <path d="M10 2.5 16 5v4.4c0 3.7-2.4 6.5-6 8.1-3.6-1.6-6-4.4-6-8.1V5l6-2.5Z" strokeLinejoin="round" />
                     <path d="m7 10 2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
-                  Verified doctor
+                  {t('profile.verified')}
                 </span>
               </div>
-              <p className="doctor-profile-specialization">{doctor.specializations.map(item => item.name).join(' · ')}</p>
+              <p className="doctor-profile-specialization">{doctor.specializations.map(item => specializationDisplayName(language, item.name)).join(' · ')}</p>
               <div className="doctor-profile-summary">
                 {doctor.qualification && <span>{doctor.qualification}</span>}
-                <span>{doctor.experienceYears} years experience</span>
+                <span>{t('profile.yearsExperience', { years: new Intl.NumberFormat(locale).format(doctor.experienceYears) })}</span>
               </div>
-              <p className="doctor-profile-practice">{doctor.clinic.name ?? 'Independent practice'}</p>
-              <p className="doctor-profile-remote"><span aria-hidden="true" />Remote consultation</p>
+              <p className="doctor-profile-practice">{doctor.clinic.name ?? t('profile.independent')}</p>
+              <p className="doctor-profile-remote"><span aria-hidden="true" />{t('profile.remote')}</p>
             </div>
           </section>
 
@@ -172,31 +175,31 @@ export function DoctorProfilePage() {
           </div>
 
           <section className="doctor-profile-section doctor-profile-about" aria-labelledby="about-doctor-heading">
-            <p className="profile-eyebrow">About</p>
-            <h2 id="about-doctor-heading">About {doctor.fullName}</h2>
+            <p className="profile-eyebrow">{t('profile.about')}</p>
+            <h2 id="about-doctor-heading">{t('profile.aboutDoctor', { name: doctor.fullName })}</h2>
             <p className="doctor-profile-about__body">{doctor.bio}</p>
           </section>
 
           <section className="doctor-profile-section doctor-profile-details" aria-labelledby="professional-info-heading">
-            <p className="profile-eyebrow">Professional details</p>
-            <h2 id="professional-info-heading">Credentials and practice</h2>
+            <p className="profile-eyebrow">{t('profile.details')}</p>
+            <h2 id="professional-info-heading">{t('profile.credentials')}</h2>
 
             <dl className="doctor-profile-details__grid">
               <div>
-                <dt>Qualification</dt>
+                <dt>{t('profile.qualification')}</dt>
                 <dd>{doctor.qualification}</dd>
               </div>
               <div>
-                <dt>Experience</dt>
-                <dd>{doctor.experienceYears} years</dd>
+                <dt>{t('profile.experience')}</dt>
+                <dd>{t('profile.years', { years: new Intl.NumberFormat(locale).format(doctor.experienceYears) })}</dd>
               </div>
               <div>
-                <dt>Practice</dt>
-                <dd>{doctor.clinic.name ?? 'Independent practice'}</dd>
+                <dt>{t('profile.practice')}</dt>
+                <dd>{doctor.clinic.name ?? t('profile.independent')}</dd>
               </div>
               <div>
-                <dt>Location</dt>
-                <dd>{[doctor.clinic.district, doctor.clinic.city].filter(Boolean).filter((item, index, values) => values.indexOf(item) === index).join(', ') || 'Not listed'}</dd>
+                <dt>{t('profile.location')}</dt>
+                <dd>{[doctor.clinic.district, doctor.clinic.city].filter(Boolean).filter((item, index, values) => values.indexOf(item) === index).join(', ') || t('profile.notListed')}</dd>
               </div>
             </dl>
           </section>
@@ -209,8 +212,8 @@ export function DoctorProfilePage() {
               </svg>
             </div>
             <div>
-              <h2 id="profile-verification-heading">Verified by MedReach</h2>
-              <p>Professional registration details were reviewed before this profile was made public.</p>
+              <h2 id="profile-verification-heading">{t('profile.verifiedBy')}</h2>
+              <p>{t('profile.verifiedCopy')}</p>
             </div>
           </section>
         </div>

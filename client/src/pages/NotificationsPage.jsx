@@ -5,12 +5,15 @@ import { PublicHeader } from '../components/PublicHeader.jsx'
 import { formatNotificationTime } from '../lib/appointment-format.js'
 import { listNotifications, markNotificationRead } from '../lib/api.js'
 import { safeInternalReturnTo } from '../lib/navigation.js'
+import { useAuth } from '../hooks/useAuth.js'
+import { useLanguage } from '../hooks/useLanguage.js'
+import { translateMessage } from '../i18n/messages.js'
 
 const pageSize = 20
 const notificationDetails = {
-  appointment_booked: { label: 'Booking', title: 'Appointment confirmed', icon: 'check' },
-  appointment_rescheduled: { label: 'Reschedule', title: 'Appointment rescheduled', icon: 'arrow' },
-  appointment_cancelled: { label: 'Cancellation', title: 'Appointment cancelled', icon: 'cancel' },
+  appointment_booked: { label: 'booking', title: 'confirmed', icon: 'check' },
+  appointment_rescheduled: { label: 'reschedule', title: 'rescheduled', icon: 'arrow' },
+  appointment_cancelled: { label: 'cancellation', title: 'cancelled', icon: 'cancel' },
 }
 const dayFormatter = new Intl.DateTimeFormat('en-CA', {
   day: '2-digit',
@@ -35,29 +38,31 @@ function NotificationIcon({ type }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v3M18 4v3M4 9h16M5 6h14v14H5z" /><path d="m9 14 2 2 4-5" /></svg>
 }
 
-function NotificationRow({ notification, markingRead, onMarkRead }) {
-  const details = notificationDetails[notification.type] ?? { label: 'Update', title: 'Appointment update' }
+function NotificationRow({ notification, markingRead, onMarkRead, locale, t }) {
+  const details = notificationDetails[notification.type] ?? { label: 'update', title: 'appointmentUpdate' }
+  const label = t(`notifications.${details.label}`)
+  const title = t(`notifications.${details.title}`)
   const actionPath = safeInternalReturnTo(notification.actionPath, null)
 
   return (
     <li className="notification-row" data-unread={!notification.isRead}>
-      <article aria-label={`${notification.isRead ? 'Read' : 'Unread'} notification: ${details.title}`}>
+      <article aria-label={t('notifications.notification', { state: t(notification.isRead ? 'notifications.read' : 'notifications.unread'), title })}>
         <div className="notification-row__marker" aria-hidden="true">
           {!notification.isRead && <span />}
         </div>
         <div className="notification-row__icon"><NotificationIcon type={notification.type} /></div>
         <div className="notification-row__body">
           <div className="notification-row__meta">
-            <span>{details.label}</span>
-            <time dateTime={notification.createdAt}>{formatNotificationTime(notification.createdAt)}</time>
+            <span>{label}</span>
+            <time dateTime={notification.createdAt}>{formatNotificationTime(notification.createdAt, locale)}</time>
           </div>
-          <h3>{details.title}</h3>
+          <h3>{title}</h3>
           <p>{notification.message}</p>
           <div className="notification-row__actions">
-            {actionPath && <Link to={actionPath}>View appointment <span aria-hidden="true">→</span></Link>}
+            {actionPath && <Link to={actionPath}>{t('notifications.view')} <span aria-hidden="true">→</span></Link>}
             {!notification.isRead && (
               <button disabled={markingRead} onClick={() => onMarkRead(notification.id)} type="button">
-                {markingRead ? 'Marking…' : 'Mark as read'}
+                {markingRead ? t('notifications.marking') : t('notifications.markRead')}
               </button>
             )}
           </div>
@@ -68,6 +73,11 @@ function NotificationRow({ notification, markingRead, onMarkRead }) {
 }
 
 export function NotificationsPage() {
+  const languageState = useLanguage()
+  const { currentUser } = useAuth()
+  const patientFacing = currentUser?.role === 'patient'
+  const t = patientFacing ? languageState.t : (key, values) => translateMessage('en', key, values)
+  const locale = patientFacing ? languageState.locale : 'en-IN'
   const [requestVersion, setRequestVersion] = useState(0)
   const [state, setState] = useState({ key: null, data: null, error: null })
   const [markingReadIds, setMarkingReadIds] = useState(() => new Set())
@@ -112,8 +122,8 @@ export function NotificationsPage() {
   const loading = state.key !== requestKey
   const groups = !loading && state.data
     ? [
-        { label: 'Today', items: state.data.items.filter(item => isToday(item.createdAt)) },
-        { label: 'Earlier', items: state.data.items.filter(item => !isToday(item.createdAt)) },
+        { key: 'today', label: t('notifications.today'), items: state.data.items.filter(item => isToday(item.createdAt)) },
+        { key: 'earlier', label: t('notifications.earlier'), items: state.data.items.filter(item => !isToday(item.createdAt)) },
       ].filter(group => group.items.length > 0)
     : []
 
@@ -123,34 +133,34 @@ export function NotificationsPage() {
       <main className="notifications-main">
         <header className="notifications-intro">
           <div>
-            <p>Care updates</p>
-            <h1>Notifications</h1>
-            <span>Important updates about your appointments and care.</span>
+            <p>{t('notifications.eyebrow')}</p>
+            <h1>{t('notifications.title')}</h1>
+            <span>{t('notifications.copy')}</span>
           </div>
           {!loading && state.data && (
-            <strong aria-label={`${state.data.unreadCount} unread notifications`}>{state.data.unreadCount} unread</strong>
+            <strong aria-label={t('navigation.notificationCount', { count: state.data.unreadCount })}>{t('notifications.unreadCount', { count: new Intl.NumberFormat(locale).format(state.data.unreadCount) })}</strong>
           )}
         </header>
 
-        {loading && <div className="notification-loading" aria-label="Loading notifications">{[1, 2, 3].map(item => <div key={item} />)}</div>}
+        {loading && <div className="notification-loading" aria-label={t('notifications.loading')}>{[1, 2, 3].map(item => <div key={item} />)}</div>}
         {!loading && state.error && (
           <div className="notifications-message" role="alert">
-            <h2>We couldn’t load notifications</h2>
+            <h2>{t('notifications.loadError')}</h2>
             <p>{state.error.message}</p>
-            <button onClick={retry} type="button">Try again</button>
+            <button onClick={retry} type="button">{t('common.tryAgain')}</button>
           </div>
         )}
         {!loading && state.data?.items.length === 0 && (
           <div className="notifications-empty">
-            <h2>No updates yet</h2>
-            <p>Important appointment and account updates will appear here.</p>
+            <h2>{t('notifications.empty')}</h2>
+            <p>{t('notifications.emptyCopy')}</p>
           </div>
         )}
         {!loading && state.data?.items.length > 0 && (
           <div className="notification-feed">
             {groups.map(group => (
-              <section aria-labelledby={`notification-group-${group.label.toLowerCase()}`} key={group.label}>
-                <h2 id={`notification-group-${group.label.toLowerCase()}`}>{group.label}</h2>
+              <section aria-labelledby={`notification-group-${group.key}`} key={group.key}>
+                <h2 id={`notification-group-${group.key}`}>{group.label}</h2>
                 <ul>
                   {group.items.map(notification => (
                     <NotificationRow
@@ -158,6 +168,8 @@ export function NotificationsPage() {
                       markingRead={markingReadIds.has(notification.id)}
                       notification={notification}
                       onMarkRead={markRead}
+                      locale={locale}
+                      t={t}
                     />
                   ))}
                 </ul>
@@ -165,7 +177,7 @@ export function NotificationsPage() {
             ))}
           </div>
         )}
-        {!loading && state.data?.total > pageSize && <p className="notifications-page-count">Showing the newest {pageSize} of {state.data.total} notifications.</p>}
+        {!loading && state.data?.total > pageSize && <p className="notifications-page-count">{t('notifications.showing', { pageSize: new Intl.NumberFormat(locale).format(pageSize), total: new Intl.NumberFormat(locale).format(state.data.total) })}</p>}
       </main>
       <PublicFooter />
     </div>

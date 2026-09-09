@@ -9,19 +9,21 @@ import { HomePage } from './pages/HomePage.jsx'
 import { LoginPage } from './pages/LoginPage.jsx'
 import { NotificationsPage } from './pages/NotificationsPage.jsx'
 import { RegisterPage } from './pages/RegisterPage.jsx'
+import { useLanguage } from './hooks/useLanguage.js'
 
 function NotFoundPage() {
+  const { t } = useLanguage()
   return (
     <main className="grid min-h-screen place-items-center bg-slate-50 px-6 text-center">
       <div>
         <p className="text-sm font-semibold uppercase tracking-[0.14em] text-blue-700">MedReach</p>
-        <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">This page is not ready yet</h1>
-        <p className="mt-3 text-slate-600">Return home while we finish the next part of doctor discovery.</p>
+        <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{t('notFound.title')}</h1>
+        <p className="mt-3 text-slate-600">{t('notFound.copy')}</p>
         <a
           className="mt-7 inline-flex min-h-11 items-center justify-center rounded-lg bg-blue-700 px-5 font-semibold text-white hover:bg-blue-800"
           href="/"
         >
-          Back to home
+          {t('notFound.back')}
         </a>
       </div>
     </main>

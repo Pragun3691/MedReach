@@ -3030,6 +3030,64 @@ select {
 .hero-reveal--4 { animation-delay: 430ms; }
 .hero-reveal--5 { animation-delay: 520ms; }
 
+:lang(hi) .home-hero-heading {
+  max-width: 52rem;
+  font-size: 2.15rem;
+  font-weight: 450;
+  line-height: 1.16;
+  letter-spacing: -0.025em;
+}
+
+:lang(hi) .home-hero-copy {
+  max-width: 46rem;
+  line-height: 1.75;
+}
+
+:lang(hi) #specializations-heading,
+:lang(hi) #how-it-works-heading,
+:lang(hi) #continuity-heading,
+:lang(hi) #doctor-discovery-heading,
+:lang(hi) #care-beyond-heading,
+:lang(hi) #trust-heading {
+  font-size: clamp(2.05rem, 4.25vw, 3.4rem);
+  font-weight: 450;
+  line-height: 1.14;
+  letter-spacing: -0.025em;
+}
+
+@media (min-width: 640px) {
+  :lang(hi) .home-hero-heading {
+    font-size: 3.05rem;
+    line-height: 1.18;
+  }
+}
+
+@media (min-width: 1024px) {
+  :lang(hi) .home-hero-heading {
+    font-size: 3.5rem;
+  }
+}
+
+@media (max-width: 639px) {
+  :lang(hi) .public-header-nav {
+    gap: 0.5rem;
+  }
+
+  :lang(hi) .public-header-login,
+  :lang(hi) .public-header-register,
+  :lang(hi) .public-header-logout {
+    white-space: nowrap;
+  }
+
+  :lang(hi) .public-header-register {
+    padding-inline: 0.75rem;
+  }
+
+  .patient-header-language--desktop {
+    display: none !important;
+  }
+}
+
 @keyframes hero-image-reveal {
   from { opacity: 0; transform: scale(1.035); }
   to { opacity: 1; transform: scale(1); }

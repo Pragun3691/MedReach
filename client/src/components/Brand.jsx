@@ -8,9 +8,9 @@ function TemporaryWordmark({ inverse }) {
   )
 }
 
-export function Brand({ inverse = false }) {
+export function Brand({ inverse = false, label = 'MedReach home' }) {
   return (
-    <Link className="brand-slot" to="/" aria-label="MedReach home">
+    <Link className="brand-slot" to="/" aria-label={label}>
       <TemporaryWordmark inverse={inverse} />
     </Link>
   )
