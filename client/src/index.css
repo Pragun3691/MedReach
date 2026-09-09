@@ -1365,7 +1365,7 @@ select {
 .appointment-detail-doctor a:hover { color: #174e43; }
 .appointment-detail-doctor a:hover span { transform: translateX(4px); }
 .appointment-detail-doctor a:focus-visible { border-radius: 2px; outline: 2px solid #2c7a68; outline-offset: 4px; }
-.appointment-state-panel { position: sticky; top: 6.35rem; grid-area: panel; border: 1px solid rgba(15, 39, 71, 0.16); border-radius: 0.72rem; background: #f1eee6; padding: 1.55rem; box-shadow: 0 18px 46px -43px rgba(15, 39, 71, 0.66); }
+.appointment-state-panel { grid-area: panel; border: 1px solid rgba(15, 39, 71, 0.16); border-radius: 0.72rem; background: #f1eee6; padding: 1.55rem; box-shadow: 0 18px 46px -43px rgba(15, 39, 71, 0.66); }
 .appointment-state-panel > .patient-appointment-status { margin-top: 1rem; }
 .appointment-state-panel__schedule { display: grid; gap: 0.3rem; margin-top: 1.5rem; border-top: 1px solid rgba(15, 39, 71, 0.14); padding-top: 1.3rem; }
 .appointment-state-panel__schedule strong { color: #0f2747; font-size: 1.12rem; font-weight: 650; letter-spacing: -0.025em; }
