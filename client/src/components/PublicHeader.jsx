@@ -109,7 +109,7 @@ export function PublicHeader({ overlay = false, editorial = false, forceEnglish 
         <Brand inverse={inverse} label={t('common.medreachHome')} />
 
         <nav className="public-header-nav flex items-center gap-3 sm:gap-5 lg:gap-8" aria-label={t('navigation.primary')}>
-          <NavLink className={({ isActive }) => `hidden md:block ${navigationClass({ isActive }, inverse, editorial)}`} to="/doctors">{t('navigation.findDoctors')}</NavLink>
+          {currentUser?.role !== 'doctor' && <NavLink className={({ isActive }) => `hidden md:block ${navigationClass({ isActive }, inverse, editorial)}`} to="/doctors">{t('navigation.findDoctors')}</NavLink>}
           {status === 'authenticated' && currentUser && <NavLink className={({ isActive }) => `hidden md:block ${navigationClass({ isActive }, inverse, editorial)}`} to={appointmentPath}>{appointmentLabel}</NavLink>}
           {patientFacing && <LanguageControl className={status === 'authenticated' ? 'patient-header-language--desktop hidden md:inline-flex' : ''} inverse={inverse} />}
           {status === 'loading' && <span className={`h-10 w-28 animate-pulse rounded-lg ${inverse ? 'bg-white/15' : 'bg-slate-100'}`} aria-label={t('navigation.checkingSession')} />}
@@ -137,7 +137,7 @@ export function PublicHeader({ overlay = false, editorial = false, forceEnglish 
       {status === 'authenticated' && currentUser && (
         <nav className={`mx-auto flex max-w-7xl items-center gap-4 overflow-x-auto border-t px-5 py-2.5 md:hidden ${inverse ? 'border-white/15' : 'border-slate-100'}`} aria-label={t('navigation.account')}>
           {currentUser.role === 'patient' && <LanguageControl inverse={inverse} />}
-          <NavLink className={({ isActive }) => navigationClass({ isActive }, inverse, editorial)} to="/doctors">{t('navigation.findDoctors')}</NavLink>
+          {currentUser.role !== 'doctor' && <NavLink className={({ isActive }) => navigationClass({ isActive }, inverse, editorial)} to="/doctors">{t('navigation.findDoctors')}</NavLink>}
           <NavLink className={({ isActive }) => navigationClass({ isActive }, inverse, editorial)} to={appointmentPath}>{appointmentLabel}</NavLink>
           <span className={`ml-auto truncate text-xs ${inverse ? 'text-white/60' : 'text-slate-500'}`}>{t('navigation.greeting')} {firstName(currentUser.fullName)}</span>
         </nav>
