@@ -19,6 +19,7 @@ export const calendarDateSchema = z
 export const doctorIdSchema = z.coerce.number().int().positive()
 
 export const doctorSearchQuerySchema = z.object({
+  q: z.string().trim().min(1).max(120).optional(),
   name: z.string().trim().min(1).max(120).optional(),
   specialization: z.string().trim().min(1).max(100).optional(),
   problem: z.string().trim().min(1).max(100).optional(),

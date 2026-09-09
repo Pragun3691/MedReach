@@ -4,6 +4,8 @@ import { AuthPageFrame } from '../components/AuthPageFrame.jsx'
 import { FormField, inputClassName, PasswordField } from '../components/FormField.jsx'
 import { listSpecializations, registerDoctorAccount, registerPatientAccount } from '../lib/api.js'
 import { safeInternalReturnTo } from '../lib/navigation.js'
+import { useLanguage } from '../hooks/useLanguage.js'
+import { translateMessage } from '../i18n/messages.js'
 
 const initialPatient = { fullName: '', email: '', password: '', confirmPassword: '' }
 const initialDoctor = {
@@ -23,14 +25,14 @@ const initialDoctor = {
 
 const doctorStepOneFields = ['fullName', 'email', 'password', 'confirmPassword', 'qualification', 'experienceYears']
 
-function validateBase(values) {
+function validateBase(values, t = (key, data) => translateMessage('en', key, data)) {
   const errors = {}
-  if (values.fullName.trim().length < 2) errors.fullName = 'Enter your full name.'
-  if (!/^\S+@\S+\.\S+$/.test(values.email.trim())) errors.email = 'Enter a valid email address.'
-  if (values.password.length < 12) errors.password = 'Use at least 12 characters.'
-  else if (values.password.length > 128) errors.password = 'Password must be 128 characters or fewer.'
-  if (!values.confirmPassword) errors.confirmPassword = 'Confirm your password.'
-  else if (values.confirmPassword !== values.password) errors.confirmPassword = 'Passwords do not match.'
+  if (values.fullName.trim().length < 2) errors.fullName = t('auth.enterName')
+  if (!/^\S+@\S+\.\S+$/.test(values.email.trim())) errors.email = t('auth.validEmail')
+  if (values.password.length < 12) errors.password = t('auth.shortPassword')
+  else if (values.password.length > 128) errors.password = t('auth.longPassword')
+  if (!values.confirmPassword) errors.confirmPassword = t('auth.confirmRequired')
+  else if (values.confirmPassword !== values.password) errors.confirmPassword = t('auth.mismatch')
   return errors
 }
 
@@ -73,9 +75,11 @@ function ErrorSummary({ errors }) {
 }
 
 export function RegisterPage() {
+  const languageState = useLanguage()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const role = searchParams.get('role') === 'doctor' ? 'doctor' : 'patient'
+  const t = role === 'patient' ? languageState.t : (key, data) => translateMessage('en', key, data)
   const returnTo = safeInternalReturnTo(searchParams.get('returnTo'))
   const [patient, setPatient] = useState(initialPatient)
   const [doctor, setDoctor] = useState(initialDoctor)
@@ -153,7 +157,7 @@ export function RegisterPage() {
       continueDoctorRegistration()
       return
     }
-    const nextErrors = role === 'doctor' ? validateDoctor(values) : validateBase(values)
+    const nextErrors = role === 'doctor' ? validateDoctor(values) : validateBase(values, t)
 
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors)
@@ -193,8 +197,8 @@ export function RegisterPage() {
       navigate(`/login?${loginParams.toString()}`, { replace: true })
     } catch (error) {
       if (error.code === 'EMAIL_IN_USE') {
-        setErrors({ email: 'An account with this email already exists.' })
-        setApiError('This email is already registered. Try logging in instead.')
+        setErrors({ email: role === 'patient' ? t('auth.emailUsed') : 'An account with this email already exists.' })
+        setApiError(role === 'patient' ? t('auth.emailUsedCopy') : 'This email is already registered. Try logging in instead.')
         if (role === 'doctor') setDoctorStep(1)
         focusFirstInvalid({ email: true })
       } else if (error.code === 'INVALID_SPECIALIZATION') {
@@ -205,11 +209,11 @@ export function RegisterPage() {
           error.details.map(detail => [detail.field.split('.')[0], detail.message]),
         )
         setErrors(fieldErrors)
-        setApiError('Please review the highlighted fields.')
+        setApiError(role === 'patient' ? t('auth.validationReview') : 'Please review the highlighted fields.')
         if (role === 'doctor' && doctorStepOneFields.some(field => fieldErrors[field])) setDoctorStep(1)
         focusFirstInvalid(fieldErrors)
       } else {
-        setApiError('We could not create your account right now. Please try again.')
+        setApiError(role === 'patient' ? t('auth.registerError') : 'We could not create your account right now. Please try again.')
       }
     } finally {
       setSubmitting(false)
@@ -257,11 +261,11 @@ export function RegisterPage() {
       <section className={role === 'patient' ? 'auth-workspace' : 'doctor-onboarding'} aria-labelledby="register-form-heading">
 
         <div className={role === 'patient' ? 'auth-workspace__intro' : 'mt-6'}>
-          <p className={role === 'doctor' ? 'doctor-form-eyebrow' : undefined}>{role === 'doctor' ? 'Professional onboarding' : 'Join MedReach'}</p>
+          <p className={role === 'doctor' ? 'doctor-form-eyebrow' : undefined}>{role === 'doctor' ? 'Professional onboarding' : t('auth.join')}</p>
           {role === 'patient' ? (
             <>
-              <h1 id="register-form-heading">Create your account</h1>
-              <span>Create a patient account to book consultations and continue your care.</span>
+              <h1 id="register-form-heading">{t('auth.registerTitle')}</h1>
+              <span>{t('auth.registerCopy')}</span>
             </>
           ) : (
             <>
@@ -294,32 +298,34 @@ export function RegisterPage() {
           {(role === 'patient' || doctorStep === 1) && (
             <div className={role === 'doctor' ? 'doctor-step-panel' : 'grid gap-5'} key="account-step">
               <div className={role === 'patient' ? 'grid gap-5' : 'grid gap-5 sm:grid-cols-2'}>
-                {field('fullName', 'Full name', { autoComplete: 'name', placeholder: role === 'doctor' ? 'Dr. Priya Sharma' : 'Priya Sharma' })}
-                {field('email', 'Email', { autoComplete: 'email', placeholder: 'you@example.com', type: 'email' })}
+                {field('fullName', role === 'patient' ? t('auth.fullName') : 'Full name', { autoComplete: 'name', placeholder: role === 'doctor' ? 'Dr. Priya Sharma' : 'Priya Sharma' })}
+                {field('email', role === 'patient' ? t('auth.email') : 'Email', { autoComplete: 'email', placeholder: 'you@example.com', type: 'email' })}
               </div>
               <div className={role === 'patient' ? 'grid gap-5' : 'grid gap-5 sm:grid-cols-2'}>
                 <PasswordField
                   autoComplete="new-password"
                   disabled={submitting}
                   error={errors.password}
-                  hint="Use 12 to 128 characters."
+                  hint={role === 'patient' ? t('auth.passwordHint') : 'Use 12 to 128 characters.'}
                   id="register-password"
-                  label="Password"
+                  label={role === 'patient' ? t('auth.password') : 'Password'}
                   onChange={event => update('password', event.target.value)}
                   onToggle={() => setPasswordVisible(value => !value)}
                   value={values.password}
                   visible={passwordVisible}
+                  toggleLabels={role === 'patient' ? { show: t('auth.show'), hide: t('auth.hide') } : undefined}
                 />
                 <PasswordField
                   autoComplete="new-password"
                   disabled={submitting}
                   error={errors.confirmPassword}
                   id="register-confirmPassword"
-                  label="Confirm password"
+                  label={role === 'patient' ? t('auth.confirmPassword') : 'Confirm password'}
                   onChange={event => update('confirmPassword', event.target.value)}
                   onToggle={() => setConfirmPasswordVisible(value => !value)}
                   value={values.confirmPassword}
                   visible={confirmPasswordVisible}
+                  toggleLabels={role === 'patient' ? { show: t('auth.show'), hide: t('auth.hide') } : undefined}
                 />
               </div>
               {role === 'doctor' && (
@@ -397,17 +403,17 @@ export function RegisterPage() {
             </div>
           ) : (
             <button className={role === 'patient' ? 'auth-submit' : 'doctor-submit'} disabled={submitting} type="submit">
-              {submitting ? 'Creating account…' : role === 'patient' ? 'Create account →' : 'Continue →'}
+              {submitting ? (role === 'patient' ? t('auth.creating') : 'Creating account…') : role === 'patient' ? t('auth.create') : 'Continue →'}
             </button>
           )}
         </form>
 
         <p className={role === 'patient' ? 'auth-switch' : 'doctor-login-route'}>
-          {role === 'patient' ? 'Already have an account? ' : 'Already submitted? '}
-          <Link to={loginUrl}>Sign in →</Link>
+          {role === 'patient' ? `${t('auth.already')} ` : 'Already submitted? '}
+          <Link to={loginUrl}>{role === 'patient' ? t('auth.signIn') : 'Sign in →'}</Link>
         </p>
         {role === 'patient' && (
-          <p className="auth-doctor-route">Are you a doctor? <Link to={doctorRegisterUrl}>Join MedReach →</Link></p>
+          <p className="auth-doctor-route">{t('auth.areDoctor')} <Link to={doctorRegisterUrl}>{t('auth.joinLink')}</Link></p>
         )}
         {role === 'doctor' && (
           <p className="doctor-patient-route">Looking for a patient account? <Link to="/register">Create a patient account →</Link></p>

@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useLanguage } from '../hooks/useLanguage.js'
 
 function parseDate(value) {
   if (!value) return null
@@ -220,9 +221,8 @@ export function DiscoverySelect({ ariaLabel, className = '', onChange, options, 
   )
 }
 
-const weekdayLabels = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
-
 export function DiscoveryDatePicker({ allowClear = true, ariaLabel = 'Availability date', className = '', minDate, onChange, preferSidePlacement = false, value, variant = 'filter' }) {
+  const { locale, t } = useLanguage()
   const calendarId = useId()
   const calendarRef = useRef(null)
   const selectedDate = parseDate(value)
@@ -270,9 +270,10 @@ export function DiscoveryDatePicker({ allowClear = true, ariaLabel = 'Availabili
   }, [viewDate])
 
   const displayValue = selectedDate
-    ? new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' }).format(selectedDate)
-    : 'Any date'
-  const monthLabel = new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric' }).format(viewDate)
+    ? new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short' }).format(selectedDate)
+    : t('calendar.anyDate')
+  const monthLabel = new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(viewDate)
+  const weekdayLabels = Array.from({ length: 7 }, (_, index) => new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(new Date(2023, 0, index + 1)))
   const previousMonthEnd = new Date(viewDate.getFullYear(), viewDate.getMonth(), 0, 12)
   const previousDisabled = minimumDate ? previousMonthEnd < minimumDate : false
 
@@ -322,12 +323,12 @@ export function DiscoveryDatePicker({ allowClear = true, ariaLabel = 'Availabili
       </button>
 
       {open && createPortal(
-        <section aria-label="Choose availability date" aria-modal="false" className="discovery-popover discovery-calendar" id={calendarId} onKeyDown={handleCalendarKeyDown} ref={popoverRef} role="dialog" style={position}>
+        <section aria-label={t('calendar.chooseDate')} aria-modal="false" className="discovery-popover discovery-calendar" id={calendarId} onKeyDown={handleCalendarKeyDown} ref={popoverRef} role="dialog" style={position}>
           <div className="discovery-calendar__header">
             <strong>{monthLabel}</strong>
             <div>
-              <button aria-label="Previous month" disabled={previousDisabled} onClick={() => moveMonth(-1)} type="button">←</button>
-              <button aria-label="Next month" onClick={() => moveMonth(1)} type="button">→</button>
+              <button aria-label={t('calendar.previousMonth')} disabled={previousDisabled} onClick={() => moveMonth(-1)} type="button">←</button>
+              <button aria-label={t('calendar.nextMonth')} onClick={() => moveMonth(1)} type="button">→</button>
             </div>
           </div>
           <div className="discovery-calendar__weekdays" aria-hidden="true">
@@ -342,7 +343,7 @@ export function DiscoveryDatePicker({ allowClear = true, ariaLabel = 'Availabili
               const outsideMonth = date.getMonth() !== viewDate.getMonth()
               return (
                 <button
-                  aria-label={new Intl.DateTimeFormat('en-IN', { dateStyle: 'full' }).format(date)}
+                  aria-label={new Intl.DateTimeFormat(locale, { dateStyle: 'full' }).format(date)}
                   aria-pressed={selected}
                   className={`${selected ? 'is-selected' : ''} ${isToday ? 'is-today' : ''} ${outsideMonth ? 'is-outside' : ''}`}
                   data-calendar-focus={selected || (!value && isToday) ? 'true' : undefined}
@@ -360,8 +361,8 @@ export function DiscoveryDatePicker({ allowClear = true, ariaLabel = 'Availabili
             })}
           </div>
           <div className={`discovery-calendar__actions ${allowClear ? '' : 'is-single'}`}>
-            {allowClear && <button disabled={!value} onClick={() => { onChange(''); resetCalendarView(); closeCalendarAndFocus() }} type="button">Clear</button>}
-            <button onClick={() => chooseDate(today)} type="button">Today</button>
+            {allowClear && <button disabled={!value} onClick={() => { onChange(''); resetCalendarView(); closeCalendarAndFocus() }} type="button">{t('calendar.clear')}</button>}
+            <button onClick={() => chooseDate(today)} type="button">{t('calendar.today')}</button>
           </div>
         </section>,
         document.body,

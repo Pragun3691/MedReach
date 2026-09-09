@@ -6,9 +6,24 @@ const publicDoctorRule = `
   AND dv.status = 'approved'
 `
 
+const normalizedDoctorNameSql = `lower(regexp_replace(
+  regexp_replace(btrim(u.full_name), '^dr[.]?[[:space:]]+', 'dr ', 'i'),
+  '[[:space:]]+', ' ', 'g'
+))`
+
+function specializationMatchSql(alias, placeholder) {
+  return `EXISTS (
+    SELECT 1
+    FROM doctor_specializations ${alias}
+    WHERE ${alias}.doctor_id = u.id
+      AND ${alias}.specialization_id = ANY(${placeholder}::bigint[])
+  )`
+}
+
 function buildSearchConditions(filters) {
   const conditions = [publicDoctorRule]
   const values = []
+  let searchRankSql = null
 
   function addValue(value) {
     values.push(value)
@@ -16,11 +31,54 @@ function buildSearchConditions(filters) {
   }
 
   if (filters.name) {
-    const placeholder = addValue(`%${filters.name}%`)
-    conditions.push(`u.full_name ILIKE ${placeholder}`)
+    const placeholder = addValue(filters.name)
+    conditions.push(`strpos(${normalizedDoctorNameSql}, ${placeholder}) > 0`)
   }
 
-  if (filters.specialization) {
+  if (filters.qName) {
+    const namePlaceholder = addValue(filters.qName)
+    const nameMatchSql = `strpos(${normalizedDoctorNameSql}, ${namePlaceholder}) > 0`
+    let specializationSql = null
+
+    if (filters.qSpecializationIds?.length > 0) {
+      const specializationPlaceholder = addValue(filters.qSpecializationIds)
+      specializationSql = specializationMatchSql('ds_q', specializationPlaceholder)
+    }
+
+    conditions.push(specializationSql
+      ? `(${nameMatchSql} OR ${specializationSql})`
+      : nameMatchSql)
+
+    const specializationRank = {
+      'canonical-exact': 2,
+      'term-exact': 3,
+      prefix: 4,
+      fuzzy: 4,
+    }[filters.qSpecializationKind] ?? 5
+    const unprefixedNameSql = `regexp_replace(${normalizedDoctorNameSql}, '^dr ', '')`
+    searchRankSql = `CASE
+      WHEN ${normalizedDoctorNameSql} = ${namePlaceholder}
+        OR ${unprefixedNameSql} = ${namePlaceholder} THEN 0
+      WHEN ${nameMatchSql} THEN 1
+      ${specializationSql ? `WHEN ${specializationSql} THEN ${specializationRank}` : ''}
+      ELSE 5
+    END`
+  }
+
+  if (filters.specializationIds) {
+    if (filters.specializationIds.length === 0) conditions.push('FALSE')
+    else {
+      const placeholder = addValue(filters.specializationIds)
+      conditions.push(`
+        EXISTS (
+          SELECT 1
+          FROM doctor_specializations ds_filter
+          WHERE ds_filter.doctor_id = u.id
+            AND ds_filter.specialization_id = ANY(${placeholder}::bigint[])
+        )
+      `)
+    }
+  } else if (filters.specialization) {
     const placeholder = addValue(filters.specialization)
     conditions.push(`
       EXISTS (
@@ -33,7 +91,20 @@ function buildSearchConditions(filters) {
     `)
   }
 
-  if (filters.problem) {
+  if (filters.problemSpecializationIds) {
+    if (filters.problemSpecializationIds.length === 0) conditions.push('FALSE')
+    else {
+      const placeholder = addValue(filters.problemSpecializationIds)
+      conditions.push(`
+        EXISTS (
+          SELECT 1
+          FROM doctor_specializations ds_problem
+          WHERE ds_problem.doctor_id = u.id
+            AND ds_problem.specialization_id = ANY(${placeholder}::bigint[])
+        )
+      `)
+    }
+  } else if (filters.problem) {
     const placeholder = addValue(filters.problem)
     conditions.push(`
       EXISTS (
@@ -81,6 +152,7 @@ function buildSearchConditions(filters) {
   return {
     whereSql: conditions.map(condition => `(${condition})`).join(' AND '),
     values,
+    searchRankSql,
   }
 }
 
@@ -124,9 +196,27 @@ const publicDoctorSelect = `
 `
 
 export const publicDoctorRepository = {
+  async findSearchVocabulary() {
+    const result = await getPool().query(
+      `SELECT
+         sp.id AS specialization_id,
+         sp.name,
+         COALESCE(
+           array_agg(sst.term ORDER BY sst.term) FILTER (WHERE sst.term IS NOT NULL),
+           ARRAY[]::varchar[]
+         ) AS terms
+       FROM specializations sp
+       LEFT JOIN specialization_search_terms sst ON sst.specialization_id = sp.id
+       GROUP BY sp.id, sp.name
+       ORDER BY sp.name`,
+    )
+
+    return result.rows
+  },
+
   async search(filters) {
     const database = getPool()
-    const { whereSql, values } = buildSearchConditions(filters)
+    const { whereSql, values, searchRankSql } = buildSearchConditions(filters)
 
     const totalResult = await database.query(
       `SELECT COUNT(*) AS total
@@ -142,7 +232,7 @@ export const publicDoctorRepository = {
     const result = await database.query(
       `${publicDoctorSelect}
        WHERE ${whereSql}
-       ORDER BY next_available_at ASC NULLS LAST, u.full_name ASC
+       ORDER BY ${searchRankSql ? `${searchRankSql}, ` : ''}next_available_at ASC NULLS LAST, u.full_name ASC, u.id ASC
        LIMIT ${limitPlaceholder}
        OFFSET ${offsetPlaceholder}`,
       [...values, filters.limit, filters.offset],

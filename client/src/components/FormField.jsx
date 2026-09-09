@@ -22,6 +22,7 @@ export function PasswordField({
   autoComplete,
   hint,
   disabled,
+  toggleLabels = { show: 'Show', hide: 'Hide' },
 }) {
   return (
     <FormField error={error} hint={hint} id={id} label={label}>
@@ -44,9 +45,9 @@ export function PasswordField({
           className="absolute inset-y-1 right-1 rounded-md px-3 text-xs font-semibold text-blue-700 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-600"
           onClick={onToggle}
           type="button"
-          aria-label={`${visible ? 'Hide' : 'Show'} ${label.toLowerCase()}`}
+          aria-label={`${visible ? toggleLabels.hide : toggleLabels.show} ${label.toLowerCase()}`}
         >
-          {visible ? 'Hide' : 'Show'}
+          {visible ? toggleLabels.hide : toggleLabels.show}
         </button>
       </div>
     </FormField>

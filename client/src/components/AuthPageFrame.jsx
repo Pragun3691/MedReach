@@ -2,8 +2,10 @@ import { PublicFooter } from './PublicFooter.jsx'
 import { PublicHeader } from './PublicHeader.jsx'
 import careContinuityImage from '../assets/care-continuity.jpg'
 import doctorInsightsImage from '../assets/doctor-insights.jpg'
+import { useLanguage } from '../hooks/useLanguage.js'
 
 export function AuthPageFrame({ eyebrow, title, description, children, aside, variant }) {
+  const { t } = useLanguage()
   if (variant === 'editorial') {
     return (
       <div className="auth-page min-h-screen">
@@ -13,9 +15,9 @@ export function AuthPageFrame({ eyebrow, title, description, children, aside, va
             <img alt="" src={careContinuityImage} />
             <div className="auth-visual__overlay" />
             <div className="auth-visual__copy">
-              <p>Continuous care, secure access</p>
-              <h2 id="auth-visual-heading">Care that continues.</h2>
-              <span>Access your appointments and continue your care securely.</span>
+              <p>{t('auth.visualEyebrow')}</p>
+              <h2 id="auth-visual-heading">{t('auth.visualTitle')}</h2>
+              <span>{t('auth.visualCopy')}</span>
             </div>
           </section>
           <div className="auth-form-stage">{children}</div>
@@ -28,7 +30,7 @@ export function AuthPageFrame({ eyebrow, title, description, children, aside, va
   if (variant === 'professional') {
     return (
       <div className="doctor-register-page min-h-screen">
-        <PublicHeader />
+        <PublicHeader forceEnglish />
         <main className="doctor-register-shell">
           <aside className="doctor-register-context" aria-labelledby="doctor-register-context-heading">
             <div className="doctor-register-context__image">
@@ -50,7 +52,7 @@ export function AuthPageFrame({ eyebrow, title, description, children, aside, va
           </aside>
           <div className="doctor-register-stage">{children}</div>
         </main>
-        <PublicFooter />
+        <PublicFooter forceEnglish />
       </div>
     )
   }

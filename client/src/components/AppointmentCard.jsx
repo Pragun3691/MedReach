@@ -1,41 +1,32 @@
 import { Link } from 'react-router-dom'
+import { appointmentStatusLabels, getAppointmentDisplayStatus } from '../lib/appointment-display.js'
 import { formatAppointmentDate, formatAppointmentTime, formatFee } from '../lib/appointment-format.js'
-import { StatusBadge } from './StatusBadge.jsx'
 
-export function AppointmentCard({ appointment, audience }) {
-  const person = audience === 'doctor' ? appointment.patient.fullName : appointment.doctor.fullName
-  const personLabel = audience === 'doctor' ? 'Patient' : appointment.doctor.specializations.map(item => item.name).join(' · ')
+export function AppointmentCard({ appointment }) {
+  const displayStatus = getAppointmentDisplayStatus(appointment)
+  const patientWaiting = appointment.status === 'booked' && Boolean(appointment.consultationFlow?.readyAt)
 
   return (
-    <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_16px_36px_-34px_rgba(15,23,42,0.5)] sm:p-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h3 className="text-lg font-semibold text-slate-950">{person}</h3>
-            <StatusBadge status={appointment.status} />
-          </div>
-          <p className="mt-1 text-sm font-medium text-blue-700">{personLabel}</p>
-          {audience === 'doctor' && appointment.status === 'booked' && appointment.consultationFlow?.readyAt && (
-            <p className="mt-2 inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800">Patient Waiting</p>
-          )}
+    <article className="doctor-appointment-card" data-waiting={patientWaiting || undefined}>
+      <header className="doctor-appointment-card__header">
+        <div className="doctor-appointment-card__identity">
+          <p>Patient</p>
+          <h3>{appointment.patient.fullName}</h3>
         </div>
-        <p className="shrink-0 text-sm font-semibold text-slate-900">{formatFee(appointment.feeSnapshot)}</p>
-      </div>
+        <div className="doctor-appointment-card__badges">
+          <span className="patient-appointment-status" data-status={displayStatus}>{appointmentStatusLabels[displayStatus] ?? displayStatus}</span>
+          {patientWaiting && <span className="doctor-appointment-waiting"><span aria-hidden="true" />Patient Waiting</span>}
+        </div>
+      </header>
 
-      <dl className="mt-5 grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2">
-        <div>
-          <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">Date</dt>
-          <dd className="mt-1 text-sm font-medium text-slate-900">{formatAppointmentDate(appointment.slot.startAt, { short: true })}</dd>
-        </div>
-        <div>
-          <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">Time</dt>
-          <dd className="mt-1 text-sm font-medium text-slate-900">{formatAppointmentTime(appointment.slot.startAt)} IST · 30 minutes</dd>
-        </div>
+      <dl className="doctor-appointment-card__schedule">
+        <div><dt>Date</dt><dd>{formatAppointmentDate(appointment.slot.startAt, { short: true })}</dd></div>
+        <div><dt>Time</dt><dd>{formatAppointmentTime(appointment.slot.startAt)} IST</dd></div>
+        <div><dt>Duration</dt><dd>30 minutes</dd></div>
+        <div><dt>Consultation fee</dt><dd>{formatFee(appointment.feeSnapshot)}</dd></div>
       </dl>
 
-      <Link className="mt-5 inline-flex min-h-10 items-center justify-center rounded-lg border border-blue-700 px-4 text-sm font-semibold text-blue-700 hover:bg-blue-50" to={`/appointments/${appointment.id}`}>
-        View details
-      </Link>
+      <Link className="doctor-appointment-card__link" to={`/appointments/${appointment.id}`}>View appointment <span aria-hidden="true">→</span></Link>
     </article>
   )
 }
