@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it } from 'vitest'
 import { PatientConsultationRecord } from './PatientConsultationRecord.jsx'
+import { LanguageProvider } from '../context/LanguageProvider.jsx'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -26,11 +27,11 @@ async function renderRecord(value = consultation) {
   const host = document.createElement('div')
   document.body.append(host)
   const root = createRoot(host)
-  await act(async () => root.render(<MemoryRouter><PatientConsultationRecord consultation={value} doctor={doctor} /></MemoryRouter>))
+  await act(async () => root.render(<LanguageProvider><MemoryRouter><PatientConsultationRecord consultation={value} doctor={doctor} /></MemoryRouter></LanguageProvider>))
   return { host, root }
 }
 
-afterEach(() => document.body.replaceChildren())
+afterEach(() => { document.body.replaceChildren(); window.localStorage.clear() })
 
 describe('PatientConsultationRecord', () => {
   it('renders notes and every structured prescription item as escaped read-only text', async () => {
@@ -58,6 +59,18 @@ describe('PatientConsultationRecord', () => {
     expect(host.textContent).toContain('No medicines were prescribed during this consultation.')
     expect(host.textContent).toContain('No follow-up was recommended for this consultation.')
     expect(host.querySelector('a')).toBeNull()
+    await act(async () => root.unmount())
+  })
+
+  it('translates only record chrome and preserves doctor-entered clinical text exactly', async () => {
+    window.localStorage.setItem('medreach.language', 'hi')
+    const { host, root } = await renderRecord()
+    expect(host.textContent).toContain('कंसल्टेशन रिकॉर्ड')
+    expect(host.querySelector('.patient-record-notes').textContent).toBe(consultation.notes)
+    expect([...host.querySelectorAll('.patient-prescription-item h4')].map(item => item.textContent)).toEqual(['Medicine A', 'Medicine B'])
+    expect(host.textContent).toContain('Once daily')
+    expect(host.textContent).toContain('After food')
+    expect(host.textContent).toContain(doctor.fullName)
     await act(async () => root.unmount())
   })
 })

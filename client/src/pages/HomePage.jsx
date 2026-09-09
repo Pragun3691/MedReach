@@ -9,21 +9,13 @@ import { DiscoverySearch } from '../components/DiscoverySearch.jsx'
 import { PublicFooter } from '../components/PublicFooter.jsx'
 import { PublicHeader } from '../components/PublicHeader.jsx'
 import { getHomeDiscovery } from '../lib/api.js'
+import { useLanguage } from '../hooks/useLanguage.js'
+import { specializationDisplayName } from '../i18n/messages.js'
 
 const specializationOrder = ['General Medicine', 'Dermatology', 'Cardiology', 'Gynecology', 'Pediatrics', 'Psychiatry']
 
-const careSteps = [
-  { number: '01', title: 'Search', description: 'Search by doctor, specialization or health concern.' },
-  { number: '02', title: 'Choose', description: 'Choose real availability and a 30-minute slot.' },
-  { number: '03', title: 'Meet', description: 'Meet the doctor remotely.' },
-  { number: '04', title: 'Continue', description: 'Keep consultations, prescriptions and follow-ups connected.' },
-]
-
-const trustItems = [
-  { title: 'Professional review', description: 'Registration information is reviewed before approved doctor profiles are made public.' },
-  { title: 'Permission-led privacy', description: 'Protected health information is controlled by permissions throughout the care experience.' },
-  { title: 'One connected journey', description: 'Appointments, consultations and follow-ups remain part of one continuous-care journey.' },
-]
+const careStepKeys = ['Search', 'Choose', 'Meet', 'Continue']
+const trustKeys = ['One', 'Two', 'Three']
 
 function SpecializationIcon({ name }) {
   const common = {
@@ -86,6 +78,7 @@ function SpecializationIcon({ name }) {
 }
 
 export function HomePage() {
+  const { language, t } = useLanguage()
   const [discovery, setDiscovery] = useState({ specializations: [], doctors: [] })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -133,21 +126,23 @@ export function HomePage() {
   const specializations = specializationOrder.map(name => (
     discovery.specializations.find(item => item.name === name) ?? { id: name, name }
   ))
+  const careSteps = careStepKeys.map((key, index) => ({ number: `0${index + 1}`, title: t(`home.step${key}`), description: t(`home.step${key}Copy`) }))
+  const trustItems = trustKeys.map(key => ({ title: t(`home.trust${key}`), description: t(`home.trust${key}Copy`) }))
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#F8F6F1] text-[#1D2A35]">
       <PublicHeader overlay />
       <main>
         <section className="relative isolate flex min-h-[88svh] overflow-hidden bg-[#0F2747] text-white" aria-labelledby="home-hero-heading">
-          <img alt="A doctor providing remote care from her consultation room" className="hero-image absolute inset-0 -z-20 size-full object-cover object-[72%_center] sm:object-[70%_center] lg:object-right" fetchPriority="high" src={heroImage} />
+          <img alt={t('home.heroAlt')} className="hero-image absolute inset-0 -z-20 size-full object-cover object-[72%_center] sm:object-[70%_center] lg:object-right" fetchPriority="high" src={heroImage} />
           <div className="hero-image-overlay absolute inset-0 -z-10" aria-hidden="true" />
           <div className="mx-auto flex w-full max-w-7xl items-end px-5 pb-12 pt-32 sm:px-8 sm:pb-16 sm:pt-36 lg:px-10 lg:pb-20 lg:pt-40">
             <div className="w-full max-w-4xl">
-              <p className="hero-reveal hero-reveal--1 flex items-center gap-3 text-xs font-bold tracking-[0.18em] text-[#A8E6CF] sm:text-sm"><span className="h-px w-8 bg-[#A8E6CF]" aria-hidden="true" />REMOTE CARE, MADE CLEARER</p>
-              <h1 className="hero-reveal hero-reveal--2 mt-5 max-w-3xl text-[2.4rem] font-medium leading-[1.04] tracking-[-0.04em] text-white sm:text-[3.5rem] lg:text-[4rem]" id="home-hero-heading">Care that continues, wherever you are.</h1>
-              <p className="hero-reveal hero-reveal--3 mt-5 max-w-2xl text-base leading-7 text-white/78 sm:text-lg sm:leading-8">Find verified doctors, view real availability, book remote consultations and keep follow-up care connected.</p>
+              <p className="hero-reveal hero-reveal--1 flex items-center gap-3 text-xs font-bold tracking-[0.18em] text-[#A8E6CF] sm:text-sm"><span className="h-px w-8 bg-[#A8E6CF]" aria-hidden="true" />{t('home.heroEyebrow')}</p>
+              <h1 className="home-hero-heading hero-reveal hero-reveal--2 mt-5 max-w-3xl text-[2.4rem] font-medium leading-[1.04] tracking-[-0.04em] text-white sm:text-[3.5rem] lg:text-[4rem]" id="home-hero-heading">{t('home.heroTitle')}</h1>
+              <p className="home-hero-copy hero-reveal hero-reveal--3 mt-5 max-w-2xl text-base leading-7 text-white/78 sm:text-lg sm:leading-8">{t('home.heroCopy')}</p>
               <DiscoverySearch className="hero-reveal hero-reveal--4 mt-7 sm:mt-9" tone="hero" />
-              <p className="hero-reveal hero-reveal--5 mt-4 text-xs leading-5 text-white/68 sm:text-sm">Not for emergencies. If you need urgent help, contact your local emergency service.</p>
+              <p className="hero-reveal hero-reveal--5 mt-4 text-xs leading-5 text-white/68 sm:text-sm">{t('home.emergency')}</p>
             </div>
           </div>
         </section>
@@ -156,15 +151,15 @@ export function HomePage() {
           <div className="mx-auto max-w-7xl px-5 py-20 sm:px-8 sm:py-24 lg:px-10 lg:py-28">
             <div className="grid gap-7 md:grid-cols-[1fr_auto] md:items-end" data-home-reveal>
               <div className="max-w-2xl">
-                <p className="editorial-eyebrow">Browse care</p>
-                <h2 className="editorial-heading mt-4" id="specializations-heading">Start with the care you need.</h2>
-                <p className="mt-5 max-w-xl leading-7 text-[#34534D]">Choose a starting point and meet doctors with the right focus for your concern.</p>
+                <p className="editorial-eyebrow">{t('home.browse')}</p>
+                <h2 className="editorial-heading mt-4" id="specializations-heading">{t('home.browseTitle')}</h2>
+                <p className="mt-5 max-w-xl leading-7 text-[#34534D]">{t('home.browseCopy')}</p>
               </div>
-              <Link className="arrow-link group w-fit" to="/doctors">View all doctors <span className="arrow-link__icon" aria-hidden="true">→</span></Link>
+              <Link className="arrow-link group w-fit" to="/doctors">{t('home.viewAll')} <span className="arrow-link__icon" aria-hidden="true">→</span></Link>
             </div>
 
             {loading ? (
-              <div className="specialization-grid mt-12" aria-label="Loading specializations">
+              <div className="specialization-grid mt-12" aria-label={t('home.loadingSpecializations')}>
                 {[1, 2, 3, 4, 5, 6].map(item => <span className="h-44 animate-pulse bg-white/16" key={item} />)}
               </div>
             ) : (
@@ -173,7 +168,7 @@ export function HomePage() {
                   <Link className="specialization-link group" data-home-reveal key={specialization.id} style={{ '--reveal-delay': `${(index % 3) * 60}ms` }} to={`/doctors?specialization=${encodeURIComponent(specialization.name)}`}>
                     <span className="specialization-icon"><SpecializationIcon name={specialization.name} /></span>
                     <span className="mt-7 flex items-end justify-between gap-4">
-                      <span className="text-xl font-medium tracking-[-0.025em] text-[#0F2747] sm:text-2xl">{specialization.name}</span>
+                      <span className="text-xl font-medium tracking-[-0.025em] text-[#0F2747] sm:text-2xl">{specializationDisplayName(language, specialization.name)}</span>
                       <span className="specialization-arrow" aria-hidden="true">→</span>
                     </span>
                   </Link>
@@ -183,8 +178,8 @@ export function HomePage() {
 
             {!loading && error && (
               <div className="mt-7 flex flex-wrap items-center gap-4 text-sm text-[#34534D]" role="status">
-                <p>Live specialization data is temporarily unavailable. You can still browse by care area.</p>
-                <button className="font-semibold underline decoration-[#2C7A68]/50 underline-offset-4 hover:decoration-[#2C7A68]" onClick={retry} type="button">Try again</button>
+                <p>{t('home.specializationError')}</p>
+                <button className="font-semibold underline decoration-[#2C7A68]/50 underline-offset-4 hover:decoration-[#2C7A68]" onClick={retry} type="button">{t('common.tryAgain')}</button>
               </div>
             )}
           </div>
@@ -194,10 +189,10 @@ export function HomePage() {
           <div className="mx-auto max-w-7xl px-5 py-18 sm:px-8 sm:py-22 lg:px-10 lg:py-24">
             <div className="grid gap-7 lg:grid-cols-[0.92fr_1.08fr] lg:items-end" data-home-reveal>
               <div>
-                <p className="editorial-eyebrow">Your care journey</p>
-                <h2 className="editorial-heading mt-4" id="how-it-works-heading">Clear from search to follow-up.</h2>
+                <p className="editorial-eyebrow">{t('home.journey')}</p>
+                <h2 className="editorial-heading mt-4" id="how-it-works-heading">{t('home.journeyTitle')}</h2>
               </div>
-              <p className="max-w-xl text-base leading-7 text-[#53616D] lg:justify-self-end lg:text-lg lg:leading-8">A simple path to remote care, with the context from each step ready for the next one.</p>
+              <p className="max-w-xl text-base leading-7 text-[#53616D] lg:justify-self-end lg:text-lg lg:leading-8">{t('home.journeyCopy')}</p>
             </div>
 
             <ol className="journey-track mt-12">
@@ -218,13 +213,13 @@ export function HomePage() {
         <section className="continuity-section" id="continuity" aria-labelledby="continuity-heading">
           <div className="mx-auto grid max-w-[1440px] lg:grid-cols-[0.9fr_1.1fr] lg:items-stretch">
             <div className="continuity-copy px-5 py-20 sm:px-8 sm:py-24 lg:flex lg:flex-col lg:justify-center lg:px-16 lg:py-28" data-home-reveal>
-              <p className="editorial-eyebrow">Continuity matters</p>
-              <h2 className="editorial-heading mt-4 max-w-xl" id="continuity-heading">Care shouldn’t restart with every appointment.</h2>
-              <p className="mt-6 max-w-lg text-base leading-7 text-[#53616D] sm:text-lg sm:leading-8">MedReach keeps consultations, follow-ups and the context around your care connected, so the next conversation can begin where the last one ended.</p>
-              <Link className="arrow-link group mt-8" to="/register">Create your account <span className="arrow-link__icon" aria-hidden="true">→</span></Link>
+              <p className="editorial-eyebrow">{t('home.continuity')}</p>
+              <h2 className="editorial-heading mt-4 max-w-xl" id="continuity-heading">{t('home.continuityTitle')}</h2>
+              <p className="mt-6 max-w-lg text-base leading-7 text-[#53616D] sm:text-lg sm:leading-8">{t('home.continuityCopy')}</p>
+              <Link className="arrow-link group mt-8" to="/register">{t('home.createAccount')} <span className="arrow-link__icon" aria-hidden="true">→</span></Link>
             </div>
             <div className="h-[29rem] overflow-hidden lg:h-auto lg:min-h-[42rem]" data-home-reveal="image">
-              <img alt="A patient reviewing her follow-up care plan at home" className="continuity-image editorial-image size-full object-cover object-[72%_center] sm:object-[78%_center] lg:object-[84%_center]" decoding="async" loading="lazy" src={continuityImage} />
+              <img alt={t('home.continuityAlt')} className="continuity-image editorial-image size-full object-cover object-[72%_center] sm:object-[78%_center] lg:object-[84%_center]" decoding="async" loading="lazy" src={continuityImage} />
             </div>
           </div>
         </section>
@@ -232,13 +227,13 @@ export function HomePage() {
         <section className="bg-[#0F2747] text-white" id="doctor-discovery" aria-labelledby="doctor-discovery-heading">
           <div className="mx-auto grid max-w-[1440px] lg:grid-cols-[1.08fr_0.92fr] lg:items-stretch">
             <div className="order-2 h-[29rem] overflow-hidden lg:order-1 lg:h-auto lg:min-h-[41rem]" data-home-reveal="image">
-              <img alt="A doctor speaking attentively during a remote consultation" className="editorial-image size-full object-cover object-center" decoding="async" loading="lazy" src={doctorDiscoveryImage} />
+              <img alt={t('home.discoveryAlt')} className="editorial-image size-full object-cover object-center" decoding="async" loading="lazy" src={doctorDiscoveryImage} />
             </div>
             <div className="order-1 px-5 py-20 sm:px-8 sm:py-24 lg:order-2 lg:flex lg:flex-col lg:justify-center lg:px-16 lg:py-24" data-home-reveal>
-              <p className="editorial-eyebrow editorial-eyebrow--light">Doctor discovery</p>
-              <h2 className="editorial-heading editorial-heading--light mt-4 max-w-xl" id="doctor-discovery-heading">Know who you’re consulting before you book.</h2>
-              <p className="mt-6 max-w-lg text-base leading-7 text-white/68 sm:text-lg sm:leading-8">Review verified profiles, qualifications and professional information, explore each doctor’s specialization, then choose real availability and a clear path to remote care.</p>
-              <Link className="arrow-link arrow-link--light group mt-8" to="/doctors">Find a doctor <span className="arrow-link__icon" aria-hidden="true">→</span></Link>
+              <p className="editorial-eyebrow editorial-eyebrow--light">{t('home.discovery')}</p>
+              <h2 className="editorial-heading editorial-heading--light mt-4 max-w-xl" id="doctor-discovery-heading">{t('home.discoveryTitle')}</h2>
+              <p className="mt-6 max-w-lg text-base leading-7 text-white/68 sm:text-lg sm:leading-8">{t('home.discoveryCopy')}</p>
+              <Link className="arrow-link arrow-link--light group mt-8" to="/doctors">{t('footer.findDoctor')} <span className="arrow-link__icon" aria-hidden="true">→</span></Link>
             </div>
           </div>
         </section>
@@ -247,43 +242,43 @@ export function HomePage() {
           <div className="mx-auto max-w-7xl px-5 py-20 sm:px-8 sm:py-24 lg:px-10 lg:py-28">
             <div className="grid gap-7 lg:grid-cols-[1.05fr_0.95fr] lg:items-end" data-home-reveal>
               <div>
-                <p className="editorial-eyebrow">Beyond the consultation</p>
-                <h2 className="editorial-heading mt-4" id="care-beyond-heading">More of your healthcare, connected.</h2>
+                <p className="editorial-eyebrow">{t('home.beyond')}</p>
+                <h2 className="editorial-heading mt-4" id="care-beyond-heading">{t('home.beyondTitle')}</h2>
               </div>
-              <p className="max-w-xl text-base leading-7 text-[#53616D] lg:justify-self-end lg:text-lg lg:leading-8">A considered look at where MedReach is headed—from prescription-connected medicine access to useful guidance from verified doctors.</p>
+              <p className="max-w-xl text-base leading-7 text-[#53616D] lg:justify-self-end lg:text-lg lg:leading-8">{t('home.beyondCopy')}</p>
             </div>
 
             <div className="mt-12 grid gap-5 lg:grid-cols-[1.18fr_0.82fr] lg:grid-rows-2">
               <article className="feature-teaser group relative min-h-[35rem] overflow-hidden bg-[#0F2747] text-white lg:row-span-2" data-home-reveal="image">
-                <img alt="Prescription medicines arranged with a care instruction sheet" className="feature-teaser__image absolute inset-0 size-full object-cover object-[48%_center]" decoding="async" loading="lazy" src={medicineImage} />
+                <img alt={t('home.medicinesAlt')} className="feature-teaser__image absolute inset-0 size-full object-cover object-[48%_center]" decoding="async" loading="lazy" src={medicineImage} />
                 <div className="absolute inset-0 bg-gradient-to-t from-[#07182c]/96 via-[#07182c]/48 to-[#07182c]/5" aria-hidden="true" />
                 <div className="absolute inset-x-0 bottom-0 p-7 sm:p-10">
-                  <p className="text-xs font-bold tracking-[0.18em] text-[#A8E6CF]">MEDICINES</p>
-                  <h3 className="mt-3 max-w-xl text-3xl font-medium tracking-[-0.035em] sm:text-4xl">Prescription-connected access, without losing the care context.</h3>
-                  <p className="mt-4 max-w-xl leading-7 text-white/72">Designed to make prescribed medicines easier to understand, organize and follow within the wider care journey.</p>
+                  <p className="text-xs font-bold tracking-[0.18em] text-[#A8E6CF]">{t('home.medicines')}</p>
+                  <h3 className="mt-3 max-w-xl text-3xl font-medium tracking-[-0.035em] sm:text-4xl">{t('home.medicinesTitle')}</h3>
+                  <p className="mt-4 max-w-xl leading-7 text-white/72">{t('home.medicinesCopy')}</p>
                   <span className="mt-7 block h-px w-10 bg-[#A8E6CF]/70" aria-hidden="true" />
                 </div>
               </article>
 
               <article className="feature-teaser group grid min-h-72 overflow-hidden bg-[#EEE8DE] sm:grid-cols-[0.92fr_1.08fr] lg:min-h-0" data-home-reveal>
                 <div className="overflow-hidden">
-                  <img alt="A doctor reviewing educational healthcare material" className="feature-teaser__image h-56 w-full object-cover object-[70%_center] sm:h-full" decoding="async" loading="lazy" src={doctorInsightsImage} />
+                  <img alt={t('home.insightsAlt')} className="feature-teaser__image h-56 w-full object-cover object-[70%_center] sm:h-full" decoding="async" loading="lazy" src={doctorInsightsImage} />
                 </div>
                 <div className="flex flex-col justify-between p-7 sm:p-8">
-                  <p className="text-xs font-bold tracking-[0.18em] text-[#2C7A68]">DOCTOR INSIGHTS</p>
+                  <p className="text-xs font-bold tracking-[0.18em] text-[#2C7A68]">{t('home.doctorInsights')}</p>
                   <div className="mt-10">
-                    <h3 className="text-2xl font-medium tracking-[-0.025em] text-[#0F2747]">Guidance from verified doctors.</h3>
-                    <p className="mt-3 text-sm leading-6 text-[#53616D]">Educational perspectives grounded in clinical experience, presented with clarity.</p>
-                    <Link className="arrow-link group/link mt-5 text-sm" to="/doctors">Meet our doctors <span className="arrow-link__icon" aria-hidden="true">→</span></Link>
+                    <h3 className="text-2xl font-medium tracking-[-0.025em] text-[#0F2747]">{t('home.insightsTitle')}</h3>
+                    <p className="mt-3 text-sm leading-6 text-[#53616D]">{t('home.insightsCopy')}</p>
+                    <Link className="arrow-link group/link mt-5 text-sm" to="/doctors">{t('home.meetDoctors')} <span className="arrow-link__icon" aria-hidden="true">→</span></Link>
                   </div>
                 </div>
               </article>
 
               <article className="feature-teaser group flex min-h-64 flex-col justify-between bg-[#D8ECE3] p-7 sm:p-8" data-home-reveal>
-                <p className="text-xs font-bold tracking-[0.18em] text-[#245F54]">HEALTH ARTICLES</p>
+                <p className="text-xs font-bold tracking-[0.18em] text-[#245F54]">{t('home.healthArticles')}</p>
                 <div className="mt-12 max-w-md">
-                  <h3 className="text-2xl font-medium tracking-[-0.025em] text-[#0F2747]">Useful reading for better-informed care.</h3>
-                  <p className="mt-3 text-sm leading-6 text-[#45645D]">A considered home for clear, plain-language health education as MedReach grows.</p>
+                  <h3 className="text-2xl font-medium tracking-[-0.025em] text-[#0F2747]">{t('home.articlesTitle')}</h3>
+                  <p className="mt-3 text-sm leading-6 text-[#45645D]">{t('home.articlesCopy')}</p>
                   <span className="mt-6 block h-px w-10 bg-[#2C7A68]/45" aria-hidden="true" />
                 </div>
               </article>
@@ -295,8 +290,8 @@ export function HomePage() {
           <div className="mx-auto max-w-7xl px-5 py-16 sm:px-8 sm:py-18 lg:px-10 lg:py-20">
             <div className="grid gap-10 lg:grid-cols-[0.74fr_1.26fr] lg:gap-20">
               <div data-home-reveal>
-                <p className="editorial-eyebrow">Trust at every step</p>
-                <h2 className="editorial-heading mt-4 max-w-lg" id="trust-heading">Built for care that feels considered.</h2>
+                <p className="editorial-eyebrow">{t('home.trust')}</p>
+                <h2 className="editorial-heading mt-4 max-w-lg" id="trust-heading">{t('home.trustTitle')}</h2>
               </div>
               <div>
                 {trustItems.map((item, index) => (

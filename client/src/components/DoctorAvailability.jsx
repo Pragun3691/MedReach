@@ -4,16 +4,17 @@ import { getDoctorSlots } from '../lib/api.js'
 import { addCalendarDays, todayInIndia } from '../lib/date.js'
 import { BookingBoundaryDialog } from './BookingBoundaryDialog.jsx'
 import { DiscoveryDatePicker } from './DiscoveryControls.jsx'
+import { useLanguage } from '../hooks/useLanguage.js'
 
-function formatDay(value, selectedDate) {
+function formatDay(value, selectedDate, locale, t) {
   const date = new Date(`${value}T12:00:00+05:30`)
   const today = todayInIndia()
   const tomorrow = addCalendarDays(today, 1)
-  const weekday = value === today ? 'Today' : value === tomorrow ? 'Tomorrow' : new Intl.DateTimeFormat('en-IN', {
+  const weekday = value === today ? t('booking.today') : value === tomorrow ? t('booking.tomorrow') : new Intl.DateTimeFormat(locale, {
     weekday: 'short',
     timeZone: 'Asia/Kolkata',
   }).format(date)
-  const calendarDate = new Intl.DateTimeFormat('en-IN', {
+  const calendarDate = new Intl.DateTimeFormat(locale, {
     day: 'numeric',
     month: 'short',
     timeZone: 'Asia/Kolkata',
@@ -21,8 +22,8 @@ function formatDay(value, selectedDate) {
   return { weekday, calendarDate, selected: value === selectedDate }
 }
 
-function formatTime(value) {
-  return new Intl.DateTimeFormat('en-IN', {
+function formatTime(value, locale) {
+  return new Intl.DateTimeFormat(locale, {
     hour: 'numeric',
     minute: '2-digit',
     timeZone: 'Asia/Kolkata',
@@ -38,6 +39,7 @@ function visibleDates(selectedDate) {
 
 export function DoctorAvailability({ doctor, selectedDate, requestedSlotId, rescheduleFrom, onDateChange }) {
   const { status } = useAuth()
+  const { locale, t } = useLanguage()
   const [requestVersion, setRequestVersion] = useState(0)
   const [slotState, setSlotState] = useState({ key: null, data: null, error: null })
   const [dateAvailabilityState, setDateAvailabilityState] = useState({ key: null, values: {} })
@@ -95,16 +97,16 @@ export function DoctorAvailability({ doctor, selectedDate, requestedSlotId, resc
     <aside className="booking-workspace" aria-labelledby="availability-heading">
       <div className="booking-workspace__heading">
         <div>
-          <p className="profile-eyebrow">{rescheduleFrom ? 'Choose a new time' : 'Book a consultation'}</p>
-          <h2 id="availability-heading">Choose a date and time</h2>
+          <p className="profile-eyebrow">{rescheduleFrom ? t('booking.chooseNew') : t('booking.book')}</p>
+          <h2 id="availability-heading">{t('booking.chooseDateTime')}</h2>
         </div>
-        <span className="booking-workspace__duration">30 min</span>
+        <span className="booking-workspace__duration">{t('booking.duration')}</span>
       </div>
-      <p className="booking-workspace__timezone">Available times are shown in Indian Standard Time.</p>
+      <p className="booking-workspace__timezone">{t('booking.timezone')}</p>
 
-      <div className="booking-date-strip" aria-label="Choose an appointment date">
+      <div className="booking-date-strip" aria-label={t('booking.chooseAppointmentDate')}>
         {dates.map(date => {
-          const label = formatDay(date, selectedDate)
+          const label = formatDay(date, selectedDate, locale, t)
           const availability = dateAvailabilityState.key === dateAvailabilityKey
             ? dateAvailabilityState.values[date]
             : undefined
@@ -115,7 +117,7 @@ export function DoctorAvailability({ doctor, selectedDate, requestedSlotId, resc
               onClick={() => onDateChange(date)}
               type="button"
               aria-pressed={label.selected}
-              aria-label={`${label.weekday}, ${label.calendarDate}${availability === true ? ', available' : availability === false ? ', no availability' : ''}`}
+              aria-label={`${label.weekday}, ${label.calendarDate}${availability === true ? `, ${t('booking.available')}` : availability === false ? `, ${t('booking.unavailable')}` : ''}`}
             >
               <span>{label.weekday}</span>
               <strong>{label.calendarDate}</strong>
@@ -125,33 +127,33 @@ export function DoctorAvailability({ doctor, selectedDate, requestedSlotId, resc
       </div>
 
       <div className="booking-another-date">
-        <span>Another date</span>
-        <DiscoveryDatePicker allowClear={false} ariaLabel="Choose another appointment date" className="booking-date-picker" minDate={todayInIndia()} onChange={onDateChange} preferSidePlacement value={selectedDate} variant="field" />
+        <span>{t('booking.anotherDate')}</span>
+        <DiscoveryDatePicker allowClear={false} ariaLabel={t('booking.chooseAnotherDate')} className="booking-date-picker" minDate={todayInIndia()} onChange={onDateChange} preferSidePlacement value={selectedDate} variant="field" />
       </div>
 
       <div className="booking-times">
         <div className="booking-times__heading">
-          <h3>Available times</h3>
-          {!loading && slots.length > 0 && <span>{slots.length} slots</span>}
+          <h3>{t('booking.availableTimes')}</h3>
+          {!loading && slots.length > 0 && <span>{t(slots.length === 1 ? 'booking.oneSlot' : 'booking.manySlots', { count: new Intl.NumberFormat(locale).format(slots.length) })}</span>}
         </div>
 
         {loading && (
-          <div className="booking-slot-grid" aria-label="Loading available slots">
+          <div className="booking-slot-grid" aria-label={t('booking.loadingSlots')}>
             {[1, 2, 3, 4].map(item => <span className="booking-slot-skeleton animate-pulse" key={item} />)}
           </div>
         )}
 
         {!loading && error && (
           <div className="booking-times__error">
-            <p>Available times could not be loaded.</p>
-            <button onClick={() => setRequestVersion(version => version + 1)} type="button">Try again</button>
+            <p>{t('booking.timesError')}</p>
+            <button onClick={() => setRequestVersion(version => version + 1)} type="button">{t('common.tryAgain')}</button>
           </div>
         )}
 
         {!loading && !error && slots.length === 0 && (
           <div className="booking-empty-state">
-            <p>No slots on this date</p>
-            <span>Choose another available date to continue.</span>
+            <p>{t('booking.noSlots')}</p>
+            <span>{t('booking.noSlotsCopy')}</span>
           </div>
         )}
 
@@ -167,7 +169,7 @@ export function DoctorAvailability({ doctor, selectedDate, requestedSlotId, resc
                   type="button"
                   aria-pressed={selected}
                 >
-                  {formatTime(slot.startAt)}
+                  {formatTime(slot.startAt, locale)}
                 </button>
               )
             })}
@@ -177,11 +179,11 @@ export function DoctorAvailability({ doctor, selectedDate, requestedSlotId, resc
 
       <div className="booking-summary">
         <div className="booking-summary__fee">
-          <span>Consultation fee</span>
+          <span>{t('booking.fee')}</span>
           <strong>
             {selectedSlot?.fee === null || (!selectedSlot && doctor.defaultFee === null)
-              ? 'Shown at confirmation'
-              : `₹${selectedSlot?.fee ?? doctor.defaultFee}`}
+              ? t('booking.shownAtConfirmation')
+              : new Intl.NumberFormat(locale, { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(selectedSlot?.fee ?? doctor.defaultFee)}
           </strong>
         </div>
         <button
@@ -193,13 +195,13 @@ export function DoctorAvailability({ doctor, selectedDate, requestedSlotId, resc
           }}
           type="button"
         >
-          {selectedSlot ? `${rescheduleFrom ? 'Reschedule to' : 'Continue with'} ${formatTime(selectedSlot.startAt)}` : 'Select a time to continue'}
+          {selectedSlot ? t(rescheduleFrom ? 'booking.rescheduleTo' : 'booking.continueWith', { time: formatTime(selectedSlot.startAt, locale) }) : t('booking.selectTime')}
           {selectedSlot && <span aria-hidden="true">→</span>}
         </button>
         <p className="booking-summary__safety">
           {status === 'authenticated'
-            ? rescheduleFrom ? 'Your current appointment stays unchanged until you confirm.' : 'No appointment is created until you confirm.'
-            : 'You’ll sign in before confirming the appointment.'}
+            ? rescheduleFrom ? t('booking.unchanged') : t('booking.notCreated')
+            : t('booking.signInFirst')}
         </p>
       </div>
 

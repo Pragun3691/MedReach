@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthContext } from '../context/auth-context.js'
+import { LanguageProvider } from '../context/LanguageProvider.jsx'
 import { AppointmentDetailPage } from './AppointmentDetailPage.jsx'
 
 const api = vi.hoisted(() => ({
@@ -42,7 +43,7 @@ async function renderPage(user, responses) {
   for (const response of responses) api.getAppointment.mockResolvedValueOnce({ appointment: response })
   api.getAppointment.mockResolvedValue({ appointment: responses.at(-1) })
   const host = document.createElement('div'); document.body.append(host); const root = createRoot(host)
-  await act(async () => { root.render(<AuthContext.Provider value={{ currentUser: user }}><MemoryRouter initialEntries={['/appointments/42']}><Routes><Route element={<AppointmentDetailPage />} path="/appointments/:appointmentId" /></Routes></MemoryRouter></AuthContext.Provider>); await Promise.resolve(); await Promise.resolve() })
+  await act(async () => { root.render(<LanguageProvider><AuthContext.Provider value={{ currentUser: user }}><MemoryRouter initialEntries={['/appointments/42']}><Routes><Route element={<AppointmentDetailPage />} path="/appointments/:appointmentId" /></Routes></MemoryRouter></AuthContext.Provider></LanguageProvider>); await Promise.resolve(); await Promise.resolve() })
   return { host, root }
 }
 
@@ -50,6 +51,7 @@ function button(host, text) { return [...host.querySelectorAll('button')].find(i
 async function click(element) { await act(async () => { element.click(); await Promise.resolve(); await Promise.resolve() }) }
 
 beforeEach(() => {
+  window.localStorage.clear()
   vi.useFakeTimers(); vi.setSystemTime('2030-01-01T09:56:00.000Z')
   Object.values(api).forEach(mock => mock.mockReset())
   api.markAppointmentReady.mockResolvedValue({}); api.openAppointmentRoom.mockResolvedValue({}); api.beginAppointmentConsultation.mockResolvedValue({}); api.markAppointmentNoShow.mockResolvedValue({})

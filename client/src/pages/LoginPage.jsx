@@ -4,17 +4,19 @@ import { AuthPageFrame } from '../components/AuthPageFrame.jsx'
 import { FormField, inputClassName, PasswordField } from '../components/FormField.jsx'
 import { useAuth } from '../hooks/useAuth.js'
 import { safeInternalReturnTo } from '../lib/navigation.js'
+import { useLanguage } from '../hooks/useLanguage.js'
 
-function validate(values) {
+function validate(values, t) {
   const errors = {}
-  if (!values.email.trim()) errors.email = 'Enter your email address.'
-  else if (!/^\S+@\S+\.\S+$/.test(values.email.trim())) errors.email = 'Enter a valid email address.'
-  if (!values.password) errors.password = 'Enter your password.'
-  else if (values.password.length > 128) errors.password = 'Password must be 128 characters or fewer.'
+  if (!values.email.trim()) errors.email = t('auth.enterEmail')
+  else if (!/^\S+@\S+\.\S+$/.test(values.email.trim())) errors.email = t('auth.validEmail')
+  if (!values.password) errors.password = t('auth.enterPassword')
+  else if (values.password.length > 128) errors.password = t('auth.longPassword')
   return errors
 }
 
 export function LoginPage() {
+  const { t } = useLanguage()
   const { status, login } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
@@ -39,7 +41,7 @@ export function LoginPage() {
 
   async function handleSubmit(event) {
     event.preventDefault()
-    const nextErrors = validate(values)
+    const nextErrors = validate(values, t)
 
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors)
@@ -54,13 +56,13 @@ export function LoginPage() {
       navigate(returnTo, { replace: true })
     } catch (error) {
       if (error.code === 'INVALID_CREDENTIALS') {
-        setApiError('The email or password is incorrect. Please check both and try again.')
+        setApiError(t('auth.invalidCredentials'))
       } else if (error.code === 'ACCOUNT_DISABLED') {
-        setApiError('This account is disabled. Please contact MedReach support for help.')
+        setApiError(t('auth.disabled'))
       } else if (error.code === 'VALIDATION_ERROR') {
-        setApiError('Please check the information you entered and try again.')
+        setApiError(t('auth.review'))
       } else {
-        setApiError('We could not sign you in right now. Please try again.')
+        setApiError(t('auth.signInError'))
       }
     } finally {
       setSubmitting(false)
@@ -79,15 +81,15 @@ export function LoginPage() {
     <AuthPageFrame variant="editorial">
       <section className="auth-workspace" aria-labelledby="login-form-heading">
         <div className="auth-workspace__intro">
-          <p>Welcome back</p>
-          <h1 id="login-form-heading">Sign in to MedReach</h1>
-          <span>Access your appointments and continue your care.</span>
+          <p>{t('auth.welcome')}</p>
+          <h1 id="login-form-heading">{t('auth.signInTitle')}</h1>
+          <span>{t('auth.signInCopy')}</span>
         </div>
 
         {hasBookingContext && (
           <div className="auth-context" role="status">
-            <p>Your appointment is waiting</p>
-            <span>Your selected appointment will still be here after you sign in.</span>
+            <p>{t('auth.waiting')}</p>
+            <span>{t('auth.waitingCopy')}</span>
           </div>
         )}
 
@@ -95,7 +97,7 @@ export function LoginPage() {
           <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-900" role="status">
             {registered === 'doctor'
               ? 'Your doctor account was created. You can sign in while your profile awaits verification.'
-              : 'Your patient account was created. Sign in to continue.'}
+              : t('auth.patientCreated')}
           </div>
         )}
 
@@ -106,7 +108,7 @@ export function LoginPage() {
         )}
 
         <form className="mt-6 space-y-5" noValidate onSubmit={handleSubmit}>
-          <FormField error={errors.email} id="login-email" label="Email">
+          <FormField error={errors.email} id="login-email" label={t('auth.email')}>
             <input
               aria-describedby={errors.email ? 'login-email-error' : undefined}
               aria-invalid={Boolean(errors.email)}
@@ -126,23 +128,24 @@ export function LoginPage() {
             disabled={submitting}
             error={errors.password}
             id="login-password"
-            label="Password"
+            label={t('auth.password')}
             onChange={event => update('password', event.target.value)}
             onToggle={() => setPasswordVisible(value => !value)}
             value={values.password}
             visible={passwordVisible}
+            toggleLabels={{ show: t('auth.show'), hide: t('auth.hide') }}
           />
           <button
             className="auth-submit"
             disabled={submitting}
             type="submit"
           >
-            {submitting ? 'Signing in…' : 'Sign in →'}
+            {submitting ? t('auth.signingIn') : t('auth.signIn')}
           </button>
         </form>
 
         <p className="auth-switch">
-          New to MedReach? <Link to={registerUrl}>Create an account →</Link>
+          {t('auth.newUser')} <Link to={registerUrl}>{t('auth.createAccount')}</Link>
         </p>
       </section>
     </AuthPageFrame>

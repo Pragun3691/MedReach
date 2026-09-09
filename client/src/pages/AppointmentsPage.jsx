@@ -3,8 +3,10 @@ import { PatientAppointmentSections } from '../components/PatientAppointmentSect
 import { PublicFooter } from '../components/PublicFooter.jsx'
 import { PublicHeader } from '../components/PublicHeader.jsx'
 import { listPatientAppointments } from '../lib/api.js'
+import { useLanguage } from '../hooks/useLanguage.js'
 
 export function AppointmentsPage() {
+  const { t } = useLanguage()
   const [requestVersion, setRequestVersion] = useState(0)
   const [state, setState] = useState({ key: null, data: null, error: null })
   const retry = useCallback(() => setRequestVersion(version => version + 1), [])
@@ -28,17 +30,17 @@ export function AppointmentsPage() {
       <PublicHeader editorial />
       <main className="patient-appointments-shell">
         <div className="patient-appointments__intro">
-          <p>Your care schedule</p>
-          <h1>My Appointments</h1>
-          <span>View upcoming consultations and review your previous appointment activity.</span>
+          <p>{t('appointments.eyebrow')}</p>
+          <h1>{t('appointments.title')}</h1>
+          <span>{t('appointments.copy')}</span>
         </div>
 
-        {loading && <div className="patient-appointments__loading animate-pulse" aria-label="Loading appointments"><div /><div /><div /></div>}
+        {loading && <div className="patient-appointments__loading animate-pulse" aria-label={t('appointments.loading')}><div /><div /><div /></div>}
         {!loading && state.error && (
           <div className="patient-appointments__error">
-            <h2>We couldn’t load your appointments</h2>
+            <h2>{t('appointments.loadError')}</h2>
             <p>{state.error.message}</p>
-            <button onClick={retry} type="button">Try again</button>
+            <button onClick={retry} type="button">{t('common.tryAgain')}</button>
           </div>
         )}
         {!loading && state.data && <PatientAppointmentSections appointments={state.data} />}
