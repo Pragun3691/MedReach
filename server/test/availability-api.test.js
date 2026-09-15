@@ -21,13 +21,79 @@ function createTestContext() {
     { id: 14, fullName: 'Dr. Disabled', email: 'disabled@example.test', role: 'doctor', isEnabled: true },
   ]
   const statuses = new Map([[10, 'approved'], [11, 'pending'], [12, 'rejected'], [13, 'approved'], [14, 'approved']])
+  const defaultFees = new Map([[10, 650], [11, 500], [12, 550], [13, null], [14, 600]])
   const databaseDisabledDoctorIds = new Set()
   const blocks = []
   const slots = []
+  const appointments = []
   let nextBlockId = 1
   let nextSlotId = 100
 
+  function addBlock({ doctorId, startAt, endAt, effectiveFee = null, slotStarts = [] }) {
+    const block = {
+      id: nextBlockId++,
+      doctorId,
+      startAt: new Date(startAt),
+      endAt: new Date(endAt),
+      effectiveFee,
+    }
+    blocks.push(block)
+
+    const createdSlots = slotStarts.map(slotInput => {
+      const input = typeof slotInput === 'string' ? { startAt: slotInput } : slotInput
+      const slotStart = new Date(input.startAt)
+      const slot = {
+        id: nextSlotId++,
+        blockId: block.id,
+        startAt: slotStart,
+        endAt: new Date(slotStart.getTime() + 30 * 60 * 1000),
+        isActive: input.isActive ?? true,
+      }
+      slots.push(slot)
+      return slot
+    })
+
+    return { block, slots: createdSlots }
+  }
+
   const repository = {
+    async listForDoctor(doctorId, currentTime) {
+      const user = users.find(item => item.id === doctorId)
+      if (!user?.isEnabled || databaseDisabledDoctorIds.has(doctorId)) {
+        throw new AvailabilityDataError('ACCOUNT_DISABLED')
+      }
+      if (statuses.get(doctorId) !== 'approved') {
+        throw new AvailabilityDataError('DOCTOR_NOT_APPROVED')
+      }
+
+      return blocks
+        .filter(block => block.doctorId === doctorId && block.endAt > currentTime)
+        .sort((left, right) => left.startAt - right.startAt || left.id - right.id)
+        .flatMap(block => {
+          const blockSlots = slots
+            .filter(slot => slot.blockId === block.id)
+            .sort((left, right) => left.startAt - right.startAt || left.id - right.id)
+          const rows = blockSlots.length > 0 ? blockSlots : [null]
+
+          return rows.map(slot => ({
+            block_id: block.id,
+            block_start_at: block.startAt,
+            block_end_at: block.endAt,
+            effective_fee: block.effectiveFee ?? defaultFees.get(doctorId) ?? null,
+            slot_id: slot?.id ?? null,
+            slot_start_at: slot?.startAt ?? null,
+            slot_end_at: slot?.endAt ?? null,
+            slot_is_active: slot?.isActive ?? null,
+            slot_is_booked: slot
+              ? appointments.some(item => item.slotId === slot.id && item.status === 'booked')
+              : false,
+            slot_has_appointment_history: slot
+              ? appointments.some(item => item.slotId === slot.id)
+              : false,
+          }))
+        })
+    },
+
     async create({ doctorId, startAt, endAt, fee }) {
       const user = users.find(item => item.id === doctorId)
       if (!user?.isEnabled || databaseDisabledDoctorIds.has(doctorId)) {
@@ -58,6 +124,7 @@ function createTestContext() {
           blockId: block.id,
           startAt: new Date(slotStart),
           endAt: new Date(slotStart + 30 * 60 * 1000),
+          isActive: true,
         }
         slots.push(slot)
         createdSlots.push(slot)
@@ -95,7 +162,15 @@ function createTestContext() {
   }
 
   const availability = createAvailabilityService(repository, () => now)
-  return { app: createApp({ auth, availability }), blocks, slots, users, databaseDisabledDoctorIds }
+  return {
+    app: createApp({ auth, availability }),
+    addBlock,
+    appointments,
+    blocks,
+    databaseDisabledDoctorIds,
+    slots,
+    users,
+  }
 }
 
 async function login(app, email) {
@@ -294,6 +369,14 @@ describe('doctor availability creation API', () => {
     expect(response.body.error.code).toBe('ROLE_FORBIDDEN')
   })
 
+  it.each(['pending@example.test', 'rejected@example.test'])('rejects a non-approved Doctor', async email => {
+    const doctor = await login(context.app, email)
+    const response = await doctor.get('/api/doctors/me/availability')
+
+    expect(response.status).toBe(403)
+    expect(response.body.error.code).toBe('DOCTOR_NOT_APPROVED')
+  })
+
   it('rejects a disabled Doctor through the existing live-account check', async () => {
     const doctor = await login(context.app, 'disabled@example.test')
     context.users.find(user => user.id === 14).isEnabled = false
@@ -311,5 +394,186 @@ describe('doctor availability creation API', () => {
     expect(response.status).toBe(403)
     expect(response.body.error.code).toBe('ACCOUNT_DISABLED')
     expect(context.blocks).toHaveLength(0)
+  })
+})
+
+describe('Doctor own availability API', () => {
+  let context
+
+  beforeEach(() => {
+    context = createTestContext()
+  })
+
+  it('requires authentication', async () => {
+    const response = await request(context.app).get('/api/doctors/me/availability')
+
+    expect(response.status).toBe(401)
+    expect(response.body.error.code).toBe('AUTHENTICATION_REQUIRED')
+  })
+
+  it('returns only blocks owned by the signed-in Doctor', async () => {
+    const own = context.addBlock({
+      doctorId: 10,
+      startAt: '2026-09-20T03:30:00.000Z',
+      endAt: '2026-09-20T04:30:00.000Z',
+      slotStarts: ['2026-09-20T03:30:00.000Z'],
+    })
+    const other = context.addBlock({
+      doctorId: 13,
+      startAt: '2026-09-20T03:30:00.000Z',
+      endAt: '2026-09-20T04:30:00.000Z',
+      slotStarts: ['2026-09-20T03:30:00.000Z'],
+    })
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.get('/api/doctors/me/availability')
+
+    expect(response.status).toBe(200)
+    expect(response.body.items.map(item => item.id)).toEqual([own.block.id])
+    expect(response.body.items.flatMap(item => item.slots).map(item => item.id)).not.toContain(other.slots[0].id)
+  })
+
+  it('sorts blocks and their slots by start time', async () => {
+    const later = context.addBlock({
+      doctorId: 10,
+      startAt: '2026-09-21T06:30:00.000Z',
+      endAt: '2026-09-21T07:30:00.000Z',
+      slotStarts: ['2026-09-21T07:00:00.000Z', '2026-09-21T06:30:00.000Z'],
+    })
+    const earlier = context.addBlock({
+      doctorId: 10,
+      startAt: '2026-09-20T03:30:00.000Z',
+      endAt: '2026-09-20T04:30:00.000Z',
+      slotStarts: ['2026-09-20T04:00:00.000Z', '2026-09-20T03:30:00.000Z'],
+    })
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.get('/api/doctors/me/availability')
+
+    expect(response.body.items.map(item => item.id)).toEqual([earlier.block.id, later.block.id])
+    expect(response.body.items[0].slots.map(item => item.startAt)).toEqual([
+      '2026-09-20T03:30:00.000Z',
+      '2026-09-20T04:00:00.000Z',
+    ])
+  })
+
+  it('uses the block fee and falls back to the Doctor default fee', async () => {
+    context.addBlock({
+      doctorId: 10,
+      startAt: '2026-09-20T03:30:00.000Z',
+      endAt: '2026-09-20T04:00:00.000Z',
+      effectiveFee: 725,
+    })
+    context.addBlock({
+      doctorId: 10,
+      startAt: '2026-09-21T03:30:00.000Z',
+      endAt: '2026-09-21T04:00:00.000Z',
+    })
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.get('/api/doctors/me/availability')
+
+    expect(response.body.items.map(item => item.effectiveFee)).toEqual([725, 650])
+  })
+
+  it('returns null when both the block fee and Doctor default fee are null', async () => {
+    context.addBlock({
+      doctorId: 13,
+      startAt: '2026-09-20T03:30:00.000Z',
+      endAt: '2026-09-20T04:00:00.000Z',
+    })
+    const doctor = await login(context.app, 'other@example.test')
+    const response = await doctor.get('/api/doctors/me/availability')
+
+    expect(response.body.items[0].effectiveFee).toBeNull()
+  })
+
+  it('marks a future block with no appointment history as deletable', async () => {
+    context.addBlock({
+      doctorId: 10,
+      startAt: '2026-09-20T03:30:00.000Z',
+      endAt: '2026-09-20T04:00:00.000Z',
+      slotStarts: ['2026-09-20T03:30:00.000Z'],
+    })
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.get('/api/doctors/me/availability')
+
+    expect(response.body.items[0]).toMatchObject({ isProtected: false, canDelete: true })
+    expect(response.body.items[0].slots[0]).toMatchObject({
+      isActive: true,
+      isBooked: false,
+      hasAppointmentHistory: false,
+    })
+  })
+
+  it('protects a block containing a booked appointment', async () => {
+    const availability = context.addBlock({
+      doctorId: 10,
+      startAt: '2026-09-20T03:30:00.000Z',
+      endAt: '2026-09-20T04:00:00.000Z',
+      slotStarts: ['2026-09-20T03:30:00.000Z'],
+    })
+    context.appointments.push({ slotId: availability.slots[0].id, status: 'booked' })
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.get('/api/doctors/me/availability')
+
+    expect(response.body.items[0]).toMatchObject({ isProtected: true, canDelete: false })
+    expect(response.body.items[0].slots[0]).toMatchObject({ isBooked: true, hasAppointmentHistory: true })
+  })
+
+  it.each(['cancelled', 'rescheduled', 'completed'])('protects a block with %s appointment history', async status => {
+    const availability = context.addBlock({
+      doctorId: 10,
+      startAt: '2026-09-20T03:30:00.000Z',
+      endAt: '2026-09-20T04:00:00.000Z',
+      slotStarts: ['2026-09-20T03:30:00.000Z'],
+    })
+    context.appointments.push({ slotId: availability.slots[0].id, status })
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.get('/api/doctors/me/availability')
+
+    expect(response.body.items[0]).toMatchObject({ isProtected: true, canDelete: false })
+    expect(response.body.items[0].slots[0]).toMatchObject({ isBooked: false, hasAppointmentHistory: true })
+  })
+
+  it('returns current availability, excludes ended blocks, and does not mark a current block deletable', async () => {
+    const current = context.addBlock({
+      doctorId: 10,
+      startAt: '2026-09-14T23:30:00.000Z',
+      endAt: '2026-09-15T00:30:00.000Z',
+    })
+    context.addBlock({
+      doctorId: 10,
+      startAt: '2026-09-14T22:00:00.000Z',
+      endAt: '2026-09-14T23:00:00.000Z',
+    })
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.get('/api/doctors/me/availability')
+
+    expect(response.body.items).toEqual([
+      expect.objectContaining({ id: current.block.id, canDelete: false }),
+    ])
+  })
+
+  it('rejects a non-Doctor through the existing role authorization', async () => {
+    const patient = await login(context.app, 'patient@example.test')
+    const response = await patient.get('/api/doctors/me/availability')
+
+    expect(response.status).toBe(403)
+    expect(response.body.error.code).toBe('ROLE_FORBIDDEN')
+  })
+
+  it('rejects a disabled Doctor through the existing live-account check', async () => {
+    const doctor = await login(context.app, 'disabled@example.test')
+    context.users.find(user => user.id === 14).isEnabled = false
+    const response = await doctor.get('/api/doctors/me/availability')
+
+    expect(response.status).toBe(403)
+    expect(response.body.error.code).toBe('ACCOUNT_DISABLED')
+  })
+
+  it('returns an empty list cleanly', async () => {
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.get('/api/doctors/me/availability')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ items: [] })
   })
 })

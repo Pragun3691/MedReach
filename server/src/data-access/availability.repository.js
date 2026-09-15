@@ -26,6 +26,54 @@ async function withTransaction(databaseProvider, work) {
 
 export function createAvailabilityRepository(databaseProvider = getPool) {
   return {
+    async listForDoctor(doctorId, now) {
+      const result = await databaseProvider().query(
+        `SELECT
+           u.is_enabled,
+           verification.status AS verification_status,
+           block.id AS block_id,
+           block.start_at AS block_start_at,
+           block.end_at AS block_end_at,
+           COALESCE(block.effective_fee, profile.default_fee) AS effective_fee,
+           slot.id AS slot_id,
+           slot.start_at AS slot_start_at,
+           slot.end_at AS slot_end_at,
+           slot.is_active AS slot_is_active,
+           EXISTS (
+             SELECT 1
+             FROM appointments appointment
+             WHERE appointment.slot_id = slot.id
+               AND appointment.status = 'booked'
+           ) AS slot_is_booked,
+           EXISTS (
+             SELECT 1
+             FROM appointments appointment_history
+             WHERE appointment_history.slot_id = slot.id
+           ) AS slot_has_appointment_history
+         FROM users u
+         JOIN doctor_profiles profile ON profile.user_id = u.id
+         LEFT JOIN doctor_verifications verification ON verification.doctor_id = u.id
+         LEFT JOIN availability_blocks block
+           ON block.doctor_id = u.id
+          AND block.end_at > $2
+         LEFT JOIN slots slot ON slot.availability_block_id = block.id
+         WHERE u.id = $1
+           AND u.role = 'doctor'
+         ORDER BY block.start_at ASC, block.id ASC, slot.start_at ASC, slot.id ASC`,
+        [doctorId, now],
+      )
+
+      const doctor = result.rows[0]
+      if (doctor && !doctor.is_enabled) {
+        throw new AvailabilityDataError('ACCOUNT_DISABLED')
+      }
+      if (!doctor || doctor.verification_status !== 'approved') {
+        throw new AvailabilityDataError('DOCTOR_NOT_APPROVED')
+      }
+
+      return result.rows.filter(row => row.block_id !== null)
+    },
+
     async create({ doctorId, startAt, endAt, fee }) {
       return withTransaction(databaseProvider, async client => {
         await client.query(

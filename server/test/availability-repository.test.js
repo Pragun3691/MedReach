@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   AvailabilityDataError,
   createAvailabilityRepository,
@@ -108,6 +108,30 @@ const interval = {
 }
 
 describe('availability repository transactions', () => {
+  it('scopes current and future availability to the requested Doctor in sorted order', async () => {
+    const database = { query: vi.fn().mockResolvedValue({
+      rows: [{
+        is_enabled: true,
+        verification_status: 'approved',
+        block_id: null,
+      }],
+    }) }
+    const repository = createAvailabilityRepository(() => database)
+    const currentTime = new Date('2026-09-15T00:00:00.000Z')
+
+    await repository.listForDoctor(10, currentTime)
+
+    const [sql, values] = database.query.mock.calls[0]
+    expect(sql).toContain('ON block.doctor_id = u.id')
+    expect(sql).toContain('AND block.end_at > $2')
+    expect(sql).toContain('WHERE u.id = $1')
+    expect(sql).toContain('ORDER BY block.start_at ASC')
+    expect(sql).toContain('slot.start_at ASC')
+    expect(sql).toContain('FROM appointments appointment_history')
+    expect(sql).not.toContain('appointment_history.status')
+    expect(values).toEqual([10, currentTime])
+  })
+
   it('rolls back the block when slot creation fails', async () => {
     const database = createTransactionalDatabase({ failSlotInsert: true })
     const repository = createAvailabilityRepository(database.provider)
