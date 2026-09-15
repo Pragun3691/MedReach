@@ -3,6 +3,7 @@ import { createAuthenticationMiddleware } from './middleware/authenticate.js'
 import { errorHandler } from './middleware/error-handler.js'
 import { notFoundHandler } from './middleware/not-found.js'
 import { createAuthRouter } from './routes/auth.routes.js'
+import { createDoctorAvailabilityRouter } from './routes/availability.routes.js'
 import {
   createAppointmentRouter,
   createDoctorAppointmentRouter,
@@ -13,6 +14,7 @@ import { createSpecializationRouter } from './routes/specialization.routes.js'
 import { createNotificationRouter } from './routes/notification.routes.js'
 import { createSessionMiddleware } from './session/session.js'
 import { authService } from './services/auth.service.js'
+import { availabilityService } from './services/availability.service.js'
 import { appointmentService } from './services/appointment.service.js'
 import { notificationService } from './services/notification.service.js'
 import { publicDoctorService } from './services/public-doctor.service.js'
@@ -20,6 +22,7 @@ import { specializationService } from './services/specialization.service.js'
 
 export function createApp({
   auth = authService,
+  availability = availabilityService,
   appointments = appointmentService,
   doctors = publicDoctorService,
   notifications = notificationService,
@@ -41,6 +44,7 @@ export function createApp({
   app.use('/api/notifications', createNotificationRouter(notifications, authenticate))
   app.use('/api/specializations', createSpecializationRouter(specializations))
   app.use('/api/doctors', createDoctorAppointmentRouter(appointments, authenticate))
+  app.use('/api/doctors', createDoctorAvailabilityRouter(availability, authenticate))
   app.use('/api/doctors', createPublicDoctorRouter(doctors))
 
   app.use(notFoundHandler)

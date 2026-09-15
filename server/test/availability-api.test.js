@@ -1,0 +1,315 @@
+import request from 'supertest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { createApp } from '../src/app.js'
+import { AvailabilityDataError } from '../src/data-access/availability.repository.js'
+import { createAvailabilityService } from '../src/services/availability.service.js'
+
+const now = new Date('2026-09-15T00:00:00.000Z')
+const validInput = {
+  date: '2026-09-20',
+  startTime: '09:00',
+  endTime: '11:00',
+}
+
+function createTestContext() {
+  const users = [
+    { id: 1, fullName: 'Ananya Rao', email: 'patient@example.test', role: 'patient', isEnabled: true },
+    { id: 10, fullName: 'Dr. Approved', email: 'approved@example.test', role: 'doctor', isEnabled: true },
+    { id: 11, fullName: 'Dr. Pending', email: 'pending@example.test', role: 'doctor', isEnabled: true },
+    { id: 12, fullName: 'Dr. Rejected', email: 'rejected@example.test', role: 'doctor', isEnabled: true },
+    { id: 13, fullName: 'Dr. Other', email: 'other@example.test', role: 'doctor', isEnabled: true },
+    { id: 14, fullName: 'Dr. Disabled', email: 'disabled@example.test', role: 'doctor', isEnabled: true },
+  ]
+  const statuses = new Map([[10, 'approved'], [11, 'pending'], [12, 'rejected'], [13, 'approved'], [14, 'approved']])
+  const databaseDisabledDoctorIds = new Set()
+  const blocks = []
+  const slots = []
+  let nextBlockId = 1
+  let nextSlotId = 100
+
+  const repository = {
+    async create({ doctorId, startAt, endAt, fee }) {
+      const user = users.find(item => item.id === doctorId)
+      if (!user?.isEnabled || databaseDisabledDoctorIds.has(doctorId)) {
+        throw new AvailabilityDataError('ACCOUNT_DISABLED')
+      }
+      if (statuses.get(doctorId) !== 'approved') {
+        throw new AvailabilityDataError('DOCTOR_NOT_APPROVED')
+      }
+      if (blocks.some(block => block.doctorId === doctorId
+        && block.startAt < endAt
+        && block.endAt > startAt)) {
+        throw new AvailabilityDataError('AVAILABILITY_OVERLAP')
+      }
+
+      const block = {
+        id: nextBlockId++,
+        doctorId,
+        startAt,
+        endAt,
+        effectiveFee: fee,
+      }
+      blocks.push(block)
+
+      const createdSlots = []
+      for (let slotStart = startAt.getTime(); slotStart < endAt.getTime(); slotStart += 30 * 60 * 1000) {
+        const slot = {
+          id: nextSlotId++,
+          blockId: block.id,
+          startAt: new Date(slotStart),
+          endAt: new Date(slotStart + 30 * 60 * 1000),
+        }
+        slots.push(slot)
+        createdSlots.push(slot)
+      }
+
+      const timestamp = now.toISOString()
+      return {
+        block: {
+          id: block.id,
+          doctor_id: doctorId,
+          start_at: startAt,
+          end_at: endAt,
+          effective_fee: fee,
+          created_at: timestamp,
+          updated_at: timestamp,
+        },
+        slots: createdSlots.map(slot => ({
+          id: slot.id,
+          start_at: slot.startAt,
+          end_at: slot.endAt,
+        })),
+      }
+    },
+  }
+
+  const auth = {
+    async authenticate(email, password) {
+      const user = users.find(item => item.email === email)
+      if (!user || password !== 'test-password') throw new Error('Invalid test login')
+      return user
+    },
+    async getSessionUser(userId) {
+      return users.find(item => item.id === userId) ?? null
+    },
+  }
+
+  const availability = createAvailabilityService(repository, () => now)
+  return { app: createApp({ auth, availability }), blocks, slots, users, databaseDisabledDoctorIds }
+}
+
+async function login(app, email) {
+  const agent = request.agent(app)
+  const response = await agent.post('/api/auth/login').send({ email, password: 'test-password' })
+  expect(response.status).toBe(200)
+  return agent
+}
+
+describe('doctor availability creation API', () => {
+  let context
+
+  beforeEach(() => {
+    context = createTestContext()
+  })
+
+  it('requires authentication', async () => {
+    const response = await request(context.app).post('/api/doctors/me/availability').send(validInput)
+
+    expect(response.status).toBe(401)
+    expect(response.body.error.code).toBe('AUTHENTICATION_REQUIRED')
+  })
+
+  it('allows an approved Doctor to create availability', async () => {
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.post('/api/doctors/me/availability').send(validInput)
+
+    expect(response.status).toBe(201)
+    expect(response.body.availability).toMatchObject({
+      doctorId: 10,
+      date: validInput.date,
+      startAt: '2026-09-20T03:30:00.000Z',
+      endAt: '2026-09-20T05:30:00.000Z',
+      fee: null,
+    })
+  })
+
+  it('generates the correct number of 30-minute slots', async () => {
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.post('/api/doctors/me/availability').send(validInput)
+
+    expect(response.body.availability.slots).toHaveLength(4)
+    expect(context.slots).toHaveLength(4)
+    expect(context.slots.every(slot => slot.endAt - slot.startAt === 30 * 60 * 1000)).toBe(true)
+  })
+
+  it('accepts an omitted fee and stores a null block fee', async () => {
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.post('/api/doctors/me/availability').send(validInput)
+
+    expect(response.status).toBe(201)
+    expect(context.blocks[0].effectiveFee).toBeNull()
+    expect(response.body.availability.fee).toBeNull()
+  })
+
+  it('stores and returns an explicit fee', async () => {
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.post('/api/doctors/me/availability').send({ ...validInput, fee: 725.5 })
+
+    expect(response.status).toBe(201)
+    expect(context.blocks[0].effectiveFee).toBe(725.5)
+    expect(response.body.availability.fee).toBe(725.5)
+  })
+
+  it('rejects availability whose start is in the past', async () => {
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.post('/api/doctors/me/availability').send({
+      ...validInput,
+      date: '2026-09-14',
+    })
+
+    expect(response.status).toBe(400)
+    expect(response.body.error.code).toBe('AVAILABILITY_IN_PAST')
+    expect(context.blocks).toHaveLength(0)
+  })
+
+  it('rejects an impossible calendar date without rolling it over', async () => {
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.post('/api/doctors/me/availability').send({
+      ...validInput,
+      date: '2026-02-30',
+    })
+
+    expect(response.status).toBe(400)
+    expect(response.body.error.code).toBe('VALIDATION_ERROR')
+    expect(response.body.error.details).toContainEqual(expect.objectContaining({ field: 'date' }))
+    expect(context.blocks).toHaveLength(0)
+  })
+
+  it.each(['05:00', '05:30'])('rejects a same-date IST start at or before the fixed current time', async startTime => {
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.post('/api/doctors/me/availability').send({
+      date: '2026-09-15',
+      startTime,
+      endTime: '06:30',
+    })
+
+    expect(response.status).toBe(400)
+    expect(response.body.error.code).toBe('AVAILABILITY_IN_PAST')
+    expect(context.blocks).toHaveLength(0)
+  })
+
+  it('accepts a later aligned time on the same Asia/Kolkata date', async () => {
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.post('/api/doctors/me/availability').send({
+      date: '2026-09-15',
+      startTime: '06:00',
+      endTime: '07:00',
+    })
+
+    expect(response.status).toBe(201)
+    expect(response.body.availability).toMatchObject({
+      startAt: '2026-09-15T00:30:00.000Z',
+      endAt: '2026-09-15T01:30:00.000Z',
+    })
+  })
+
+  it.each([
+    [{ ...validInput, startTime: '09:15' }, 'startTime'],
+    [{ ...validInput, endTime: '11:15' }, 'endTime'],
+  ])('rejects a time that is not on a 30-minute boundary', async (input, field) => {
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.post('/api/doctors/me/availability').send(input)
+
+    expect(response.status).toBe(400)
+    expect(response.body.error.code).toBe('VALIDATION_ERROR')
+    expect(response.body.error.details).toContainEqual(expect.objectContaining({ field }))
+  })
+
+  it.each(['09:00', '08:30'])('rejects an end time that is not after the start time', async endTime => {
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.post('/api/doctors/me/availability').send({
+      ...validInput,
+      startTime: '09:00',
+      endTime,
+    })
+
+    expect(response.status).toBe(400)
+    expect(response.body.error.code).toBe('VALIDATION_ERROR')
+  })
+
+  it('rejects overlapping availability for the same Doctor', async () => {
+    const doctor = await login(context.app, 'approved@example.test')
+    await doctor.post('/api/doctors/me/availability').send(validInput)
+    const response = await doctor.post('/api/doctors/me/availability').send({
+      ...validInput,
+      startTime: '10:30',
+      endTime: '12:00',
+    })
+
+    expect(response.status).toBe(409)
+    expect(response.body.error.code).toBe('AVAILABILITY_OVERLAP')
+    expect(context.blocks).toHaveLength(1)
+  })
+
+  it('allows touching half-open availability blocks', async () => {
+    const doctor = await login(context.app, 'approved@example.test')
+    const first = await doctor.post('/api/doctors/me/availability').send(validInput)
+    const second = await doctor.post('/api/doctors/me/availability').send({
+      ...validInput,
+      startTime: '11:00',
+      endTime: '12:00',
+    })
+
+    expect(first.status).toBe(201)
+    expect(second.status).toBe(201)
+    expect(context.blocks).toHaveLength(2)
+  })
+
+  it('allows different Doctors to create overlapping availability', async () => {
+    const doctor = await login(context.app, 'approved@example.test')
+    const otherDoctor = await login(context.app, 'other@example.test')
+    const responses = await Promise.all([
+      doctor.post('/api/doctors/me/availability').send(validInput),
+      otherDoctor.post('/api/doctors/me/availability').send(validInput),
+    ])
+
+    expect(responses.map(response => response.status)).toEqual([201, 201])
+    expect(context.blocks.map(block => block.doctorId).sort()).toEqual([10, 13])
+  })
+
+  it.each(['pending@example.test', 'rejected@example.test'])('rejects a non-approved Doctor', async email => {
+    const doctor = await login(context.app, email)
+    const response = await doctor.post('/api/doctors/me/availability').send(validInput)
+
+    expect(response.status).toBe(403)
+    expect(response.body.error.code).toBe('DOCTOR_NOT_APPROVED')
+    expect(context.blocks).toHaveLength(0)
+  })
+
+  it('rejects a non-Doctor through the existing role authorization', async () => {
+    const patient = await login(context.app, 'patient@example.test')
+    const response = await patient.post('/api/doctors/me/availability').send(validInput)
+
+    expect(response.status).toBe(403)
+    expect(response.body.error.code).toBe('ROLE_FORBIDDEN')
+  })
+
+  it('rejects a disabled Doctor through the existing live-account check', async () => {
+    const doctor = await login(context.app, 'disabled@example.test')
+    context.users.find(user => user.id === 14).isEnabled = false
+    const response = await doctor.post('/api/doctors/me/availability').send(validInput)
+
+    expect(response.status).toBe(403)
+    expect(response.body.error.code).toBe('ACCOUNT_DISABLED')
+  })
+
+  it('preserves ACCOUNT_DISABLED when the transactional recheck detects a disable race', async () => {
+    const doctor = await login(context.app, 'approved@example.test')
+    context.databaseDisabledDoctorIds.add(10)
+    const response = await doctor.post('/api/doctors/me/availability').send(validInput)
+
+    expect(response.status).toBe(403)
+    expect(response.body.error.code).toBe('ACCOUNT_DISABLED')
+    expect(context.blocks).toHaveLength(0)
+  })
+})
