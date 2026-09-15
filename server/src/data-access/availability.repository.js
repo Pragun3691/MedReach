@@ -24,6 +24,35 @@ async function withTransaction(databaseProvider, work) {
   }
 }
 
+async function lockDoctorForAvailability(client, doctorId) {
+  await client.query(
+    `SELECT pg_advisory_xact_lock(
+       hashtextextended('medreach:doctor-availability:' || $1::text, 0)
+     )`,
+    [doctorId],
+  )
+
+  const doctorResult = await client.query(
+    `SELECT u.is_enabled, verification.status AS verification_status
+     FROM users u
+     JOIN doctor_profiles profile ON profile.user_id = u.id
+     JOIN doctor_verifications verification ON verification.doctor_id = u.id
+     WHERE u.id = $1
+       AND u.role = 'doctor'
+     FOR UPDATE OF u, profile, verification`,
+    [doctorId],
+  )
+  const doctor = doctorResult.rows[0]
+
+  if (doctor && !doctor.is_enabled) {
+    throw new AvailabilityDataError('ACCOUNT_DISABLED')
+  }
+
+  if (!doctor || doctor.verification_status !== 'approved') {
+    throw new AvailabilityDataError('DOCTOR_NOT_APPROVED')
+  }
+}
+
 export function createAvailabilityRepository(databaseProvider = getPool) {
   return {
     async listForDoctor(doctorId, now) {
@@ -76,32 +105,7 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
 
     async create({ doctorId, startAt, endAt, fee }) {
       return withTransaction(databaseProvider, async client => {
-        await client.query(
-          `SELECT pg_advisory_xact_lock(
-             hashtextextended('medreach:doctor-availability:' || $1::text, 0)
-           )`,
-          [doctorId],
-        )
-
-        const doctorResult = await client.query(
-          `SELECT u.is_enabled, verification.status AS verification_status
-           FROM users u
-           JOIN doctor_profiles profile ON profile.user_id = u.id
-           JOIN doctor_verifications verification ON verification.doctor_id = u.id
-           WHERE u.id = $1
-             AND u.role = 'doctor'
-           FOR UPDATE OF u, profile, verification`,
-          [doctorId],
-        )
-        const doctor = doctorResult.rows[0]
-
-        if (doctor && !doctor.is_enabled) {
-          throw new AvailabilityDataError('ACCOUNT_DISABLED')
-        }
-
-        if (!doctor || doctor.verification_status !== 'approved') {
-          throw new AvailabilityDataError('DOCTOR_NOT_APPROVED')
-        }
+        await lockDoctorForAvailability(client, doctorId)
 
         const overlapResult = await client.query(
           `SELECT 1
@@ -138,6 +142,60 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
         )
 
         return { block, slots: slotsResult.rows }
+      })
+    },
+
+    async remove({ doctorId, blockId, now }) {
+      return withTransaction(databaseProvider, async client => {
+        await lockDoctorForAvailability(client, doctorId)
+
+        await client.query(
+          `SELECT slot.id
+           FROM slots slot
+           JOIN availability_blocks block ON block.id = slot.availability_block_id
+           WHERE block.id = $1
+             AND block.doctor_id = $2
+           ORDER BY slot.id
+           FOR UPDATE OF slot`,
+          [blockId, doctorId],
+        )
+
+        const blockResult = await client.query(
+          `SELECT id, start_at
+           FROM availability_blocks
+           WHERE id = $1
+             AND doctor_id = $2
+           FOR UPDATE`,
+          [blockId, doctorId],
+        )
+        const block = blockResult.rows[0]
+
+        if (!block) {
+          throw new AvailabilityDataError('AVAILABILITY_BLOCK_NOT_FOUND')
+        }
+
+        if (new Date(block.start_at) <= now) {
+          throw new AvailabilityDataError('AVAILABILITY_BLOCK_NOT_DELETABLE')
+        }
+
+        const appointmentResult = await client.query(
+          `SELECT 1
+           FROM appointments appointment
+           JOIN slots slot ON slot.id = appointment.slot_id
+           WHERE slot.availability_block_id = $1
+           LIMIT 1`,
+          [blockId],
+        )
+
+        if (appointmentResult.rowCount > 0) {
+          throw new AvailabilityDataError('AVAILABILITY_BLOCK_PROTECTED')
+        }
+
+        await client.query('DELETE FROM slots WHERE availability_block_id = $1', [blockId])
+        await client.query(
+          'DELETE FROM availability_blocks WHERE id = $1 AND doctor_id = $2',
+          [blockId, doctorId],
+        )
       })
     },
   }

@@ -39,3 +39,5 @@ export const createAvailabilitySchema = z.object({
     })
   }
 })
+
+export const availabilityBlockIdSchema = z.coerce.number().int().positive()

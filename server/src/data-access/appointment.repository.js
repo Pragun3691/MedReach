@@ -83,6 +83,55 @@ async function withTransaction(databaseProvider, work) {
   }
 }
 
+async function resolveSlotDoctorId(client, slotId) {
+  const result = await client.query(
+    `SELECT ab.doctor_id
+     FROM slots s
+     JOIN availability_blocks ab ON ab.id = s.availability_block_id
+     WHERE s.id = $1`,
+    [slotId],
+  )
+  const doctor = result.rows[0]
+
+  if (!doctor) throw new AppointmentDataError('SLOT_UNAVAILABLE')
+  return doctor.doctor_id
+}
+
+async function resolveAppointmentDoctor(client, appointmentId) {
+  const result = await client.query(
+    `SELECT a.patient_id, ab.doctor_id
+     FROM appointments a
+     JOIN slots s ON s.id = a.slot_id
+     JOIN availability_blocks ab ON ab.id = s.availability_block_id
+     WHERE a.id = $1`,
+    [appointmentId],
+  )
+
+  return result.rows[0] ?? null
+}
+
+async function lockDoctorAvailabilityShared(client, doctorId) {
+  await client.query(
+    `SELECT pg_advisory_xact_lock_shared(
+       hashtextextended('medreach:doctor-availability:' || $1::text, 0)
+     )`,
+    [doctorId],
+  )
+}
+
+async function lockDoctorAvailabilitiesShared(client, doctorIds) {
+  const uniqueDoctorIds = [...new Map(doctorIds.map(id => [String(id), id])).values()]
+  uniqueDoctorIds.sort((left, right) => {
+    const leftId = BigInt(left)
+    const rightId = BigInt(right)
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0
+  })
+
+  for (const doctorId of uniqueDoctorIds) {
+    await lockDoctorAvailabilityShared(client, doctorId)
+  }
+}
+
 async function lockSlot(client, slotId) {
   const result = await client.query(
     `SELECT
@@ -242,6 +291,8 @@ export function createAppointmentRepository(databaseProvider = getPool) {
   return {
   async book({ patientId, patientName, slotId }) {
     return withTransaction(databaseProvider, async client => {
+      const doctorId = await resolveSlotDoctorId(client, slotId)
+      await lockDoctorAvailabilityShared(client, doctorId)
       const slot = await lockSlot(client, slotId)
       const feeSnapshot = slot.effective_fee ?? slot.default_fee
       const result = await client.query(
@@ -394,6 +445,14 @@ export function createAppointmentRepository(databaseProvider = getPool) {
 
   async reschedule({ appointmentId, patientId, slotId, now = new Date() }) {
     return withTransaction(databaseProvider, async client => {
+      const originalOwner = await resolveAppointmentDoctor(client, appointmentId)
+      if (!originalOwner) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
+      if (Number(originalOwner.patient_id) !== patientId) {
+        throw new AppointmentDataError('APPOINTMENT_ACCESS_DENIED')
+      }
+      const targetDoctorId = await resolveSlotDoctorId(client, slotId)
+      await lockDoctorAvailabilitiesShared(client, [originalOwner.doctor_id, targetDoctorId])
+
       const original = await lockAppointment(client, appointmentId)
       if (!original) throw new AppointmentDataError('APPOINTMENT_NOT_FOUND')
       if (Number(original.patient_id) !== patientId) {

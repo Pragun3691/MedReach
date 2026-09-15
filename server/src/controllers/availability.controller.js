@@ -1,4 +1,7 @@
-import { createAvailabilitySchema } from '../validation/availability.schemas.js'
+import {
+  availabilityBlockIdSchema,
+  createAvailabilitySchema,
+} from '../validation/availability.schemas.js'
 
 export function createAvailabilityController(service) {
   return {
@@ -13,6 +16,13 @@ export function createAvailabilityController(service) {
       const availability = await service.create(request.authUser.id, input)
 
       response.status(201).json({ availability })
+    },
+
+    async remove(request, response) {
+      const blockId = availabilityBlockIdSchema.parse(request.params.blockId)
+      await service.remove(request.authUser.id, blockId)
+
+      response.status(204).send()
     },
   }
 }

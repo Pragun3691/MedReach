@@ -148,6 +148,34 @@ function createTestContext() {
         })),
       }
     },
+
+    async remove({ doctorId, blockId, now: currentTime }) {
+      const user = users.find(item => item.id === doctorId)
+      if (!user?.isEnabled || databaseDisabledDoctorIds.has(doctorId)) {
+        throw new AvailabilityDataError('ACCOUNT_DISABLED')
+      }
+      if (statuses.get(doctorId) !== 'approved') {
+        throw new AvailabilityDataError('DOCTOR_NOT_APPROVED')
+      }
+
+      const blockIndex = blocks.findIndex(block => block.id === blockId && block.doctorId === doctorId)
+      if (blockIndex < 0) throw new AvailabilityDataError('AVAILABILITY_BLOCK_NOT_FOUND')
+
+      const block = blocks[blockIndex]
+      if (block.startAt <= currentTime) {
+        throw new AvailabilityDataError('AVAILABILITY_BLOCK_NOT_DELETABLE')
+      }
+
+      const blockSlotIds = new Set(slots.filter(slot => slot.blockId === blockId).map(slot => slot.id))
+      if (appointments.some(appointment => blockSlotIds.has(appointment.slotId))) {
+        throw new AvailabilityDataError('AVAILABILITY_BLOCK_PROTECTED')
+      }
+
+      for (let index = slots.length - 1; index >= 0; index -= 1) {
+        if (slots[index].blockId === blockId) slots.splice(index, 1)
+      }
+      blocks.splice(blockIndex, 1)
+    },
   }
 
   const auth = {
@@ -575,5 +603,114 @@ describe('Doctor own availability API', () => {
 
     expect(response.status).toBe(200)
     expect(response.body).toEqual({ items: [] })
+  })
+})
+
+describe('Doctor availability deletion API', () => {
+  let context
+
+  beforeEach(() => {
+    context = createTestContext()
+  })
+
+  function addFutureBlock(doctorId = 10) {
+    return context.addBlock({
+      doctorId,
+      startAt: '2026-09-20T03:30:00.000Z',
+      endAt: '2026-09-20T04:30:00.000Z',
+      slotStarts: ['2026-09-20T03:30:00.000Z', '2026-09-20T04:00:00.000Z'],
+    })
+  }
+
+  it('allows the owner to delete a completely unused future block', async () => {
+    const availability = addFutureBlock()
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.delete(`/api/doctors/me/availability/${availability.block.id}`)
+
+    expect(response.status).toBe(204)
+    expect(context.blocks).toHaveLength(0)
+  })
+
+  it('removes all child slots with the unused block', async () => {
+    const availability = addFutureBlock()
+    const doctor = await login(context.app, 'approved@example.test')
+    await doctor.delete(`/api/doctors/me/availability/${availability.block.id}`)
+
+    expect(context.slots).toHaveLength(0)
+  })
+
+  it('does not reveal another Doctor\'s block', async () => {
+    const availability = addFutureBlock(13)
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.delete(`/api/doctors/me/availability/${availability.block.id}`)
+
+    expect(response.status).toBe(404)
+    expect(response.body.error.code).toBe('AVAILABILITY_BLOCK_NOT_FOUND')
+    expect(context.blocks).toHaveLength(1)
+    expect(context.slots).toHaveLength(2)
+  })
+
+  it('rejects a non-Doctor through the existing role authorization', async () => {
+    const availability = addFutureBlock()
+    const patient = await login(context.app, 'patient@example.test')
+    const response = await patient.delete(`/api/doctors/me/availability/${availability.block.id}`)
+
+    expect(response.status).toBe(403)
+    expect(response.body.error.code).toBe('ROLE_FORBIDDEN')
+  })
+
+  it('rejects a disabled Doctor through the existing live-account check', async () => {
+    const availability = addFutureBlock(14)
+    const doctor = await login(context.app, 'disabled@example.test')
+    context.users.find(user => user.id === 14).isEnabled = false
+    const response = await doctor.delete(`/api/doctors/me/availability/${availability.block.id}`)
+
+    expect(response.status).toBe(403)
+    expect(response.body.error.code).toBe('ACCOUNT_DISABLED')
+    expect(context.blocks).toHaveLength(1)
+  })
+
+  it.each(['pending@example.test', 'rejected@example.test'])('rejects a non-approved Doctor', async email => {
+    const doctorId = email === 'pending@example.test' ? 11 : 12
+    const availability = addFutureBlock(doctorId)
+    const doctor = await login(context.app, email)
+    const response = await doctor.delete(`/api/doctors/me/availability/${availability.block.id}`)
+
+    expect(response.status).toBe(403)
+    expect(response.body.error.code).toBe('DOCTOR_NOT_APPROVED')
+    expect(context.blocks).toHaveLength(1)
+  })
+
+  it.each([
+    ['current', '2026-09-14T23:30:00.000Z', '2026-09-15T00:30:00.000Z'],
+    ['past', '2026-09-14T22:00:00.000Z', '2026-09-14T23:00:00.000Z'],
+  ])('rejects a %s block', async (_label, startAt, endAt) => {
+    const availability = context.addBlock({ doctorId: 10, startAt, endAt })
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.delete(`/api/doctors/me/availability/${availability.block.id}`)
+
+    expect(response.status).toBe(409)
+    expect(response.body.error.code).toBe('AVAILABILITY_BLOCK_NOT_DELETABLE')
+    expect(context.blocks).toHaveLength(1)
+  })
+
+  it.each(['booked', 'cancelled', 'completed', 'no_show', 'rescheduled'])('protects a block with %s appointment history', async status => {
+    const availability = addFutureBlock()
+    context.appointments.push({ slotId: availability.slots[0].id, status })
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.delete(`/api/doctors/me/availability/${availability.block.id}`)
+
+    expect(response.status).toBe(409)
+    expect(response.body.error.code).toBe('AVAILABILITY_BLOCK_PROTECTED')
+    expect(context.blocks).toHaveLength(1)
+    expect(context.slots).toHaveLength(2)
+  })
+
+  it('handles an unknown block without leaking information', async () => {
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.delete('/api/doctors/me/availability/99999')
+
+    expect(response.status).toBe(404)
+    expect(response.body.error.code).toBe('AVAILABILITY_BLOCK_NOT_FOUND')
   })
 })

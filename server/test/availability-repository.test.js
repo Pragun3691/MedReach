@@ -4,9 +4,18 @@ import {
   createAvailabilityRepository,
 } from '../src/data-access/availability.repository.js'
 
+function normalizeSql(sql) {
+  return sql.replace(/\s+/g, ' ').trim()
+}
+
+const exclusiveAvailabilityLockSql = normalizeSql(`SELECT pg_advisory_xact_lock(
+  hashtextextended('medreach:doctor-availability:' || $1::text, 0)
+)`)
+
 function createTransactionalDatabase({ failSlotInsert = false } = {}) {
   const blocks = []
   const slots = []
+  const queries = []
   const lockTails = new Map()
   let nextBlockId = 1
   let nextSlotId = 100
@@ -27,7 +36,8 @@ function createTransactionalDatabase({ failSlotInsert = false } = {}) {
 
     return {
       async query(sql, values = []) {
-        const normalized = sql.replace(/\s+/g, ' ').trim()
+        const normalized = normalizeSql(sql)
+        queries.push({ sql: normalized, values })
 
         if (normalized === 'BEGIN') return { rows: [], rowCount: 0 }
         if (normalized === 'COMMIT') {
@@ -95,8 +105,103 @@ function createTransactionalDatabase({ failSlotInsert = false } = {}) {
 
   return {
     blocks,
+    queries,
     slots,
     provider: () => ({ connect }),
+  }
+}
+
+function createDeletionRaceDatabase({ failBlockDelete = false } = {}) {
+  const statements = []
+  const queries = []
+  const state = {
+    block: { id: 50, doctorId: 10, startAt: new Date('2026-09-20T03:30:00.000Z') },
+    slots: [{ id: 500, blockId: 50 }],
+    appointments: [],
+  }
+  let slotLockTail = Promise.resolve()
+
+  async function acquireSlotLock() {
+    const previous = slotLockTail
+    let release
+    const held = new Promise(resolve => { release = resolve })
+    slotLockTail = previous.then(() => held)
+    await previous
+    return release
+  }
+
+  function connect() {
+    let releaseSlotLock = null
+    let deleteSlots = false
+    let deleteBlock = false
+
+    return {
+      async query(sql, values = []) {
+        statements.push(sql)
+        const normalized = normalizeSql(sql)
+        queries.push({ sql: normalized, values })
+
+        if (normalized === 'BEGIN') return { rows: [], rowCount: 0 }
+        if (normalized === 'COMMIT') {
+          if (deleteSlots) state.slots = []
+          if (deleteBlock) state.block = null
+          releaseSlotLock?.()
+          return { rows: [], rowCount: 0 }
+        }
+        if (normalized === 'ROLLBACK') {
+          releaseSlotLock?.()
+          return { rows: [], rowCount: 0 }
+        }
+        if (normalized.includes('pg_advisory_xact_lock')) return { rows: [{}], rowCount: 1 }
+        if (normalized.includes('FROM users u')) {
+          return { rows: [{ is_enabled: true, verification_status: 'approved' }], rowCount: 1 }
+        }
+        if (normalized.includes('SELECT slot.id') && normalized.includes('FOR UPDATE OF slot')) {
+          releaseSlotLock = await acquireSlotLock()
+          return { rows: state.slots.map(slot => ({ id: slot.id })), rowCount: state.slots.length }
+        }
+        if (normalized.includes('SELECT id, start_at') && normalized.includes('FROM availability_blocks')) {
+          return state.block
+            ? { rows: [{ id: state.block.id, start_at: state.block.startAt }], rowCount: 1 }
+            : { rows: [], rowCount: 0 }
+        }
+        if (normalized.includes('FROM appointments appointment')) {
+          return {
+            rows: state.appointments.length > 0 ? [{}] : [],
+            rowCount: state.appointments.length > 0 ? 1 : 0,
+          }
+        }
+        if (normalized.startsWith('DELETE FROM slots')) {
+          deleteSlots = true
+          return { rows: [], rowCount: state.slots.length }
+        }
+        if (normalized.startsWith('DELETE FROM availability_blocks')) {
+          if (failBlockDelete) throw new Error('Simulated block delete failure')
+          deleteBlock = true
+          return { rows: [], rowCount: state.block ? 1 : 0 }
+        }
+
+        throw new Error(`Unexpected query: ${normalized}`)
+      },
+      release() {},
+    }
+  }
+
+  return {
+    state,
+    queries,
+    statements,
+    provider: () => ({ connect }),
+    async book() {
+      const release = await acquireSlotLock()
+      try {
+        if (!state.block || state.slots.length === 0) return false
+        state.appointments.push({ slotId: state.slots[0].id, status: 'booked' })
+        return true
+      } finally {
+        release()
+      }
+    },
   }
 }
 
@@ -160,5 +265,79 @@ describe('availability repository transactions', () => {
     expect(rejection.reason.code).toBe('AVAILABILITY_OVERLAP')
     expect(database.blocks).toHaveLength(1)
     expect(database.slots).toHaveLength(4)
+    const advisoryLocks = database.queries.filter(query => query.sql === exclusiveAvailabilityLockSql)
+    expect(advisoryLocks).toHaveLength(2)
+    expect(advisoryLocks.every(query => query.values[0] === 10)).toBe(true)
+  })
+
+  it('atomically removes slots and their unused future block', async () => {
+    const database = createDeletionRaceDatabase()
+    const repository = createAvailabilityRepository(database.provider)
+
+    await repository.remove({
+      doctorId: 10,
+      blockId: 50,
+      now: new Date('2026-09-15T00:00:00.000Z'),
+    })
+
+    expect(database.state.block).toBeNull()
+    expect(database.state.slots).toEqual([])
+    expect(database.state.appointments).toEqual([])
+    const advisoryLock = database.queries.findIndex(query => query.sql === exclusiveAvailabilityLockSql)
+    const slotLock = database.statements.findIndex(sql => sql.includes('FOR UPDATE OF slot'))
+    const historyCheck = database.statements.findIndex(sql => sql.includes('FROM appointments appointment'))
+    const slotDelete = database.statements.findIndex(sql => sql.startsWith('DELETE FROM slots'))
+    const blockDelete = database.statements.findIndex(sql => sql.startsWith('DELETE FROM availability_blocks'))
+    expect(advisoryLock).toBeLessThan(slotLock)
+    expect(slotLock).toBeLessThan(historyCheck)
+    expect(historyCheck).toBeLessThan(slotDelete)
+    expect(slotDelete).toBeLessThan(blockDelete)
+    expect(database.statements[historyCheck]).not.toContain('appointment.status')
+    expect(database.queries[advisoryLock].values).toEqual([10])
+  })
+
+  it('rolls back deleted child slots when deleting the block fails', async () => {
+    const database = createDeletionRaceDatabase({ failBlockDelete: true })
+    const repository = createAvailabilityRepository(database.provider)
+
+    await expect(repository.remove({
+      doctorId: 10,
+      blockId: 50,
+      now: new Date('2026-09-15T00:00:00.000Z'),
+    })).rejects.toThrow('Simulated block delete failure')
+
+    expect(database.state.block).not.toBeNull()
+    expect(database.state.slots).toEqual([{ id: 500, blockId: 50 }])
+    expect(database.state.appointments).toEqual([])
+    expect(database.statements).toContain('ROLLBACK')
+    expect(database.statements).not.toContain('COMMIT')
+  })
+
+  it('allows only booking or deletion to win their concurrent slot race', async () => {
+    const database = createDeletionRaceDatabase()
+    const repository = createAvailabilityRepository(database.provider)
+
+    const [deletion, booking] = await Promise.allSettled([
+      repository.remove({
+        doctorId: 10,
+        blockId: 50,
+        now: new Date('2026-09-15T00:00:00.000Z'),
+      }),
+      database.book(),
+    ])
+    const deletionSucceeded = deletion.status === 'fulfilled'
+    const bookingSucceeded = booking.status === 'fulfilled' && booking.value
+
+    expect(Number(deletionSucceeded) + Number(bookingSucceeded)).toBe(1)
+    if (deletionSucceeded) {
+      expect(database.state.block).toBeNull()
+      expect(database.state.slots).toEqual([])
+      expect(database.state.appointments).toEqual([])
+    } else {
+      expect(deletion.reason).toMatchObject({ code: 'AVAILABILITY_BLOCK_PROTECTED' })
+      expect(database.state.block).not.toBeNull()
+      expect(database.state.slots).toHaveLength(1)
+      expect(database.state.appointments).toHaveLength(1)
+    }
   })
 })

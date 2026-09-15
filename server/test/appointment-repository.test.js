@@ -40,12 +40,23 @@ function databaseWith(query) {
   return { client, database: { connect: vi.fn().mockResolvedValue(client) } }
 }
 
+function normalizeSql(sql) {
+  return sql.replace(/\s+/g, ' ').trim()
+}
+
+const sharedAvailabilityLockSql = normalizeSql(`SELECT pg_advisory_xact_lock_shared(
+  hashtextextended('medreach:doctor-availability:' || $1::text, 0)
+)`)
+
 describe('appointment repository transactions', () => {
   it('locks scheduling records, inserts notifications and commits a booking', async () => {
     const statements = []
-    const { client, database } = databaseWith(vi.fn(async sql => {
+    const calls = []
+    const { client, database } = databaseWith(vi.fn(async (sql, parameters) => {
       statements.push(sql)
+      calls.push({ sql: normalizeSql(sql), parameters })
       if (sql === 'BEGIN' || sql === 'COMMIT') return { rows: [] }
+      if (sql.includes('pg_advisory_xact_lock_shared')) return { rows: [{}] }
       if (sql.includes('FROM slots s')) return { rows: [validSlot] }
       if (sql.includes('INSERT INTO appointments')) return { rows: [{ id: 1000 }] }
       if (sql.includes('INSERT INTO notifications')) return { rows: [] }
@@ -58,7 +69,13 @@ describe('appointment repository transactions', () => {
 
     expect(result).toEqual(appointmentRow)
     expect(statements[0]).toBe('BEGIN')
-    expect(statements.some(sql => sql.includes('FOR UPDATE OF s, ab, dp, doctor_user, verification'))).toBe(true)
+    const advisoryLock = calls.findIndex(call => call.sql === sharedAvailabilityLockSql)
+    const slotRowLock = calls.findIndex(call => call.sql.includes('FOR UPDATE OF s, ab, dp, doctor_user, verification'))
+    const appointmentInsert = calls.findIndex(call => call.sql.startsWith('INSERT INTO appointments'))
+    expect(calls[advisoryLock].parameters).toEqual([10])
+    expect(advisoryLock).toBeGreaterThan(calls.findIndex(call => call.sql.startsWith('SELECT ab.doctor_id')))
+    expect(advisoryLock).toBeLessThan(slotRowLock)
+    expect(slotRowLock).toBeLessThan(appointmentInsert)
     expect(statements.filter(sql => sql.includes('INSERT INTO notifications'))).toHaveLength(2)
     expect(statements.at(-1)).toBe('COMMIT')
     expect(client.release).toHaveBeenCalledOnce()
@@ -73,6 +90,7 @@ describe('appointment repository transactions', () => {
     const { client, database } = databaseWith(vi.fn(async sql => {
       statements.push(sql)
       if (sql === 'BEGIN' || sql === 'ROLLBACK') return { rows: [] }
+      if (sql.includes('pg_advisory_xact_lock_shared')) return { rows: [{}] }
       if (sql.includes('FROM slots s')) return { rows: [validSlot] }
       if (sql.includes('INSERT INTO appointments')) throw uniqueError
       throw new Error(`Unexpected SQL: ${sql}`)
@@ -88,6 +106,7 @@ describe('appointment repository transactions', () => {
 
   it('rolls back a reschedule before changing the old appointment when the new slot fails validation', async () => {
     const statements = []
+    const calls = []
     const lockedAppointment = {
       id: 1000,
       patient_id: 1,
@@ -100,11 +119,16 @@ describe('appointment repository transactions', () => {
       patient_name: 'Ananya Rao',
       doctor_name: 'Dr. Aditi Sharma',
     }
-    const { database } = databaseWith(vi.fn(async sql => {
+    const { database } = databaseWith(vi.fn(async (sql, parameters) => {
       statements.push(sql)
+      calls.push({ sql: normalizeSql(sql), parameters })
       if (sql === 'BEGIN' || sql === 'ROLLBACK') return { rows: [] }
+      if (sql.includes('SELECT a.patient_id, ab.doctor_id')) {
+        return { rows: [{ patient_id: 1, doctor_id: 10 }] }
+      }
       if (sql.includes('FROM appointments a') && sql.includes('FOR UPDATE OF a')) return { rows: [lockedAppointment] }
       if (sql.includes('FROM consultations')) return { rows: [] }
+      if (sql.includes('pg_advisory_xact_lock_shared')) return { rows: [{}] }
       if (sql.includes('FROM slots s')) return { rows: [{ ...validSlot, id: 103, is_active: false }] }
       throw new Error(`Unexpected SQL: ${sql}`)
     }))
@@ -114,6 +138,52 @@ describe('appointment repository transactions', () => {
       .rejects.toBeInstanceOf(AppointmentDataError)
     expect(statements).toContain('ROLLBACK')
     expect(statements.some(sql => sql.includes("SET status = 'rescheduled'"))).toBe(false)
+    const advisoryLocks = calls.filter(call => call.sql === sharedAvailabilityLockSql)
+    const advisoryLock = calls.findIndex(call => call.sql === sharedAvailabilityLockSql)
+    const appointmentRowLock = calls.findIndex(call => call.sql.includes('FOR UPDATE OF a, s, ab'))
+    const slotRowLock = calls.findIndex(call => call.sql.includes('FOR UPDATE OF s, ab, dp, doctor_user, verification'))
+    expect(advisoryLocks.map(call => call.parameters)).toEqual([[10]])
+    expect(advisoryLock).toBeLessThan(appointmentRowLock)
+    expect(advisoryLock).toBeLessThan(slotRowLock)
+  })
+
+  it('locks both Doctors in ascending order before a cross-Doctor reschedule row lock', async () => {
+    const calls = []
+    const lockedAppointment = {
+      ...appointmentRow,
+      doctor_id: 20,
+      is_future: true,
+    }
+    let slotDoctorLookupCount = 0
+    const { database } = databaseWith(vi.fn(async (sql, parameters) => {
+      calls.push({ sql: normalizeSql(sql), parameters })
+      if (sql === 'BEGIN' || sql === 'ROLLBACK') return { rows: [] }
+      if (sql.includes('SELECT a.patient_id, ab.doctor_id')) {
+        return { rows: [{ patient_id: 1, doctor_id: 20 }] }
+      }
+      if (sql.includes('SELECT ab.doctor_id') && !sql.includes('FOR UPDATE')) {
+        slotDoctorLookupCount += 1
+        return { rows: [{ doctor_id: 10 }] }
+      }
+      if (sql.includes('pg_advisory_xact_lock_shared')) return { rows: [{}] }
+      if (sql.includes('FROM appointments a') && sql.includes('FOR UPDATE OF a')) {
+        return { rows: [lockedAppointment] }
+      }
+      if (sql.includes('FROM consultations')) return { rows: [] }
+      if (sql.includes('FROM slots s')) return { rows: [{ ...validSlot, is_active: false }] }
+      throw new Error(`Unexpected SQL: ${sql}`)
+    }))
+    const repository = createAppointmentRepository(() => database)
+
+    await expect(repository.reschedule({ appointmentId: 1000, patientId: 1, slotId: 101 }))
+      .rejects.toBeInstanceOf(AppointmentDataError)
+
+    const advisoryLocks = calls.filter(call => call.sql === sharedAvailabilityLockSql)
+    const firstRowLock = calls.findIndex(call => call.sql.includes('FOR UPDATE'))
+    expect(slotDoctorLookupCount).toBe(1)
+    expect(advisoryLocks.map(call => call.parameters)).toEqual([[10], [20]])
+    expect(calls.indexOf(advisoryLocks[0])).toBeLessThan(firstRowLock)
+    expect(calls.indexOf(advisoryLocks[1])).toBeLessThan(firstRowLock)
   })
 
   it('allows an assigned Doctor to cancel an unresolved booking after the slot ends', async () => {

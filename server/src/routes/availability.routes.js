@@ -8,6 +8,7 @@ export function createDoctorAvailabilityRouter(service, authenticate) {
 
   router.get('/me/availability', authenticate, authorizeRoles('doctor'), controller.listMine)
   router.post('/me/availability', authenticate, authorizeRoles('doctor'), controller.create)
+  router.delete('/me/availability/:blockId', authenticate, authorizeRoles('doctor'), controller.remove)
 
   return router
 }

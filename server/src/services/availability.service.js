@@ -27,6 +27,18 @@ function translateDataError(error) {
     throw new AppError(403, 'ACCOUNT_DISABLED', 'This account is disabled')
   }
 
+  if (error.code === 'AVAILABILITY_BLOCK_NOT_FOUND') {
+    throw new AppError(404, 'AVAILABILITY_BLOCK_NOT_FOUND', 'Availability block not found')
+  }
+
+  if (error.code === 'AVAILABILITY_BLOCK_NOT_DELETABLE') {
+    throw new AppError(409, 'AVAILABILITY_BLOCK_NOT_DELETABLE', 'Only future availability can be deleted')
+  }
+
+  if (error.code === 'AVAILABILITY_BLOCK_PROTECTED') {
+    throw new AppError(409, 'AVAILABILITY_BLOCK_PROTECTED', 'Availability with appointment history cannot be deleted')
+  }
+
   throw error
 }
 
@@ -112,6 +124,14 @@ export function createAvailabilityService(repository = availabilityRepository, c
           createdAt: result.block.created_at,
           updatedAt: result.block.updated_at,
         }
+      } catch (error) {
+        translateDataError(error)
+      }
+    },
+
+    async remove(doctorId, blockId) {
+      try {
+        await repository.remove({ doctorId, blockId, now: clock() })
       } catch (error) {
         translateDataError(error)
       }
