@@ -364,6 +364,57 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
       return result.rows.filter(row => row.block_id !== null)
     },
 
+    async listRecurringForDoctor(doctorId) {
+      const client = await databaseProvider().connect()
+      let result
+      try {
+        result = await client.query(
+          `SELECT
+           u.is_enabled,
+           verification.status AS verification_status,
+           recurring_rule.id AS rule_id,
+           recurring_rule.weekdays,
+           recurring_rule.start_time,
+           recurring_rule.end_time,
+           recurring_rule.starts_on,
+           recurring_rule.ends_on,
+           recurring_rule.effective_fee,
+           recurring_rule.status,
+           recurring_rule.materialized_through,
+           recurring_rule.created_at,
+           recurring_rule.updated_at,
+           (
+             SELECT COUNT(*)::int
+             FROM availability_blocks block
+             WHERE block.recurring_rule_id = recurring_rule.id
+           ) AS materialized_occurrence_count
+         FROM users u
+         JOIN doctor_profiles profile ON profile.user_id = u.id
+         LEFT JOIN doctor_verifications verification ON verification.doctor_id = u.id
+         LEFT JOIN recurring_availability_rules recurring_rule ON recurring_rule.doctor_id = u.id
+         WHERE u.id = $1
+           AND u.role = 'doctor'
+         ORDER BY
+           CASE WHEN recurring_rule.status = 'active' THEN 0 ELSE 1 END,
+           recurring_rule.created_at DESC NULLS LAST,
+           recurring_rule.id DESC NULLS LAST`,
+          [doctorId],
+        )
+      } finally {
+        client.release()
+      }
+
+      const doctor = result.rows[0]
+      if (doctor && !doctor.is_enabled) {
+        throw new AvailabilityDataError('ACCOUNT_DISABLED')
+      }
+      if (!doctor || doctor.verification_status !== 'approved') {
+        throw new AvailabilityDataError('DOCTOR_NOT_APPROVED')
+      }
+
+      return result.rows.filter(row => row.rule_id !== null)
+    },
+
     async create({ doctorId, startAt, endAt, fee }) {
       return withTransaction(databaseProvider, async client => {
         await lockDoctorForAvailability(client, doctorId)

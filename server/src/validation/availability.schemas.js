@@ -40,4 +40,34 @@ export const createAvailabilitySchema = z.object({
   }
 })
 
+export const createRecurringAvailabilitySchema = z.object({
+  weekdays: z.array(z.number().int().min(1).max(7)).min(1),
+  startTime: halfHourTimeSchema,
+  endTime: halfHourTimeSchema,
+  startsOn: calendarDateSchema,
+  endsOn: calendarDateSchema.nullable().optional(),
+  fee: z.number().finite().nonnegative().max(99999999.99).optional(),
+}).strict().superRefine((input, context) => {
+  if (halfHourTimeSchema.safeParse(input.startTime).success
+    && halfHourTimeSchema.safeParse(input.endTime).success
+    && minutesSinceMidnight(input.endTime) <= minutesSinceMidnight(input.startTime)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['endTime'],
+      message: 'End time must be after start time',
+    })
+  }
+
+  if (input.endsOn != null
+    && calendarDateSchema.safeParse(input.startsOn).success
+    && calendarDateSchema.safeParse(input.endsOn).success
+    && input.endsOn < input.startsOn) {
+    context.addIssue({
+      code: 'custom',
+      path: ['endsOn'],
+      message: 'End date must not be before start date',
+    })
+  }
+})
+
 export const availabilityBlockIdSchema = z.coerce.number().int().positive()

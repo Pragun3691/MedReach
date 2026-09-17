@@ -16,15 +16,19 @@ function translateDataError(error) {
   if (!(error instanceof AvailabilityDataError)) throw error
 
   if (error.code === 'AVAILABILITY_OVERLAP') {
-    throw new AppError(409, 'AVAILABILITY_OVERLAP', 'Availability overlaps an existing block')
+    throw new AppError(409, 'AVAILABILITY_OVERLAP', 'Availability overlaps existing availability')
   }
 
   if (error.code === 'DOCTOR_NOT_APPROVED') {
-    throw new AppError(403, 'DOCTOR_NOT_APPROVED', 'Only approved Doctors can create availability')
+    throw new AppError(403, 'DOCTOR_NOT_APPROVED', 'Only approved Doctors can manage availability')
   }
 
   if (error.code === 'ACCOUNT_DISABLED') {
     throw new AppError(403, 'ACCOUNT_DISABLED', 'This account is disabled')
+  }
+
+  if (error.code === 'RECURRING_AVAILABILITY_IN_PAST') {
+    throw new AppError(400, 'RECURRING_AVAILABILITY_IN_PAST', 'Recurring availability must include a future occurrence')
   }
 
   if (error.code === 'AVAILABILITY_BLOCK_NOT_FOUND') {
@@ -43,6 +47,25 @@ function translateDataError(error) {
 }
 
 export function createAvailabilityService(repository = availabilityRepository, clock = () => new Date()) {
+  function recurringRule(rule, materializedOccurrenceCount) {
+    return {
+      id: Number(rule.id ?? rule.rule_id),
+      weekdays: (rule.weekdays ?? []).map(Number),
+      startTime: rule.startTime ?? String(rule.start_time).slice(0, 5),
+      endTime: rule.endTime ?? String(rule.end_time).slice(0, 5),
+      startsOn: rule.startsOn ?? String(rule.starts_on).slice(0, 10),
+      endsOn: (rule.endsOn ?? rule.ends_on) == null
+        ? null
+        : String(rule.endsOn ?? rule.ends_on).slice(0, 10),
+      effectiveFee: optionalNumber(rule.fee ?? rule.effective_fee),
+      status: rule.status,
+      materializedThrough: (rule.materializedThrough ?? rule.materialized_through) == null
+        ? null
+        : String(rule.materializedThrough ?? rule.materialized_through).slice(0, 10),
+      materializedOccurrenceCount: Number(materializedOccurrenceCount),
+    }
+  }
+
   return {
     async listForDoctor(doctorId) {
       const now = clock()
@@ -124,6 +147,35 @@ export function createAvailabilityService(repository = availabilityRepository, c
           createdAt: result.block.created_at,
           updatedAt: result.block.updated_at,
         }
+      } catch (error) {
+        translateDataError(error)
+      }
+    },
+
+    async listRecurringForDoctor(doctorId) {
+      try {
+        const rows = await repository.listRecurringForDoctor(doctorId)
+        return {
+          items: rows.map(row => recurringRule(row, row.materialized_occurrence_count)),
+        }
+      } catch (error) {
+        translateDataError(error)
+      }
+    },
+
+    async createRecurring(doctorId, input) {
+      try {
+        const result = await repository.createRecurring({
+          doctorId,
+          weekdays: input.weekdays,
+          startTime: input.startTime,
+          endTime: input.endTime,
+          startsOn: input.startsOn,
+          endsOn: input.endsOn ?? null,
+          fee: input.fee ?? null,
+        }, clock())
+
+        return recurringRule(result.rule, result.materialized.length)
       } catch (error) {
         translateDataError(error)
       }

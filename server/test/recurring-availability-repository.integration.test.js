@@ -254,6 +254,61 @@ describeWithPostgres('recurring availability repository', () => {
     expect(rules.rowCount).toBe(0)
   })
 
+  it('lists only the Doctor own rules with active rules first and newest first within status', async () => {
+    const stopped = await create({ endTime: '10:00', endsOn: '2026-09-21' })
+    await query(
+      `UPDATE recurring_availability_rules
+       SET status = 'stopped', created_at = '2026-09-01T00:00:00Z'
+       WHERE id = $1`,
+      [stopped.rule.id],
+    )
+    const olderActive = await create({
+      weekdays: [2],
+      startTime: '13:00',
+      endTime: '14:00',
+      endsOn: '2026-09-22',
+    })
+    await query(
+      `UPDATE recurring_availability_rules
+       SET created_at = '2026-09-02T00:00:00Z'
+       WHERE id = $1`,
+      [olderActive.rule.id],
+    )
+    const newestActive = await create({
+      weekdays: [3],
+      startTime: '15:00',
+      endTime: '16:00',
+      endsOn: '2026-09-23',
+    })
+    await query(
+      `UPDATE recurring_availability_rules
+       SET created_at = '2026-09-03T00:00:00Z'
+       WHERE id = $1`,
+      [newestActive.rule.id],
+    )
+    await create({ doctorId: otherDoctorId, endsOn: '2026-09-21' })
+
+    const rows = await repository.listRecurringForDoctor(doctorId)
+
+    expect(rows.map(row => Number(row.rule_id))).toEqual([
+      newestActive.rule.id,
+      olderActive.rule.id,
+      stopped.rule.id,
+    ])
+    expect(rows.map(row => row.status)).toEqual(['active', 'active', 'stopped'])
+    expect(rows.map(row => row.materialized_occurrence_count)).toEqual([1, 1, 1])
+  })
+
+  it('returns an empty recurring-rule list and enforces current eligibility', async () => {
+    await expect(repository.listRecurringForDoctor(doctorId)).resolves.toEqual([])
+    await expect(repository.listRecurringForDoctor(disabledDoctorId)).rejects.toMatchObject({
+      code: 'ACCOUNT_DISABLED',
+    })
+    await expect(repository.listRecurringForDoctor(pendingDoctorId)).rejects.toMatchObject({
+      code: 'DOCTOR_NOT_APPROVED',
+    })
+  })
+
   it('materializes one matching weekday using Asia/Kolkata dates', async () => {
     const result = await create()
     const occurrences = await occurrenceRows(result.rule.id)
