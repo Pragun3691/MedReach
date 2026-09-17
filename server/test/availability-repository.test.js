@@ -59,6 +59,21 @@ function createTransactionalDatabase({ failSlotInsert = false } = {}) {
         if (normalized.includes('FROM users u')) {
           return { rows: [{ is_enabled: true, verification_status: 'approved' }], rowCount: 1 }
         }
+        if (normalized.includes('FROM recurring_availability_rules')) {
+          return { rows: [], rowCount: 0 }
+        }
+        if (normalized.includes('FROM slots slot') && normalized.includes('JOIN availability_blocks block')) {
+          await Promise.resolve()
+          const [doctorId, startAt, endAt] = values
+          const overlapping = slots.some(slot => {
+            const block = blocks.find(item => item.id === slot.availability_block_id)
+            return block?.doctor_id === doctorId
+              && slot.start_at < endAt
+              && slot.end_at > startAt
+              && slot.is_active
+          })
+          return { rows: overlapping ? [{}] : [], rowCount: overlapping ? 1 : 0 }
+        }
         if (normalized.includes('FROM availability_blocks')) {
           await Promise.resolve()
           const [doctorId, startAt, endAt] = values
