@@ -71,3 +71,4 @@ export const createRecurringAvailabilitySchema = z.object({
 })
 
 export const availabilityBlockIdSchema = z.coerce.number().int().positive()
+export const recurringAvailabilityRuleIdSchema = z.coerce.number().int().positive()

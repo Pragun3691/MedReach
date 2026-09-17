@@ -13,6 +13,7 @@ import {
   AvailabilityDataError,
   createAvailabilityRepository,
 } from '../src/data-access/availability.repository.js'
+import { createAppointmentRepository } from '../src/data-access/appointment.repository.js'
 
 const { Pool } = pg
 const describeWithPostgres = process.env.DATABASE_URL ? describe : describe.skip
@@ -35,6 +36,7 @@ describeWithPostgres('recurring availability repository', () => {
   let pool
   let schema
   let repository
+  let appointmentRepository
   let provider
   let reviewerId
   let doctorId
@@ -47,6 +49,56 @@ describeWithPostgres('recurring availability repository', () => {
     const client = await pool.connect()
     await client.query(`SET search_path TO "${schema}"`)
     return client
+  }
+
+  function deferred() {
+    let resolve
+    const promise = new Promise(resolvePromise => {
+      resolve = resolvePromise
+    })
+    return { promise, resolve }
+  }
+
+  function gatedProvider(matches) {
+    const attempted = deferred()
+    const acquired = deferred()
+    const resume = deferred()
+    let matched = false
+
+    return {
+      acquired: acquired.promise,
+      attempted: attempted.promise,
+      provider: () => ({
+        async connect() {
+          const client = await schemaClient()
+          return {
+            async query(sql, values) {
+              const shouldGate = !matched && matches(normalizeSql(sql))
+              if (shouldGate) {
+                matched = true
+                attempted.resolve()
+              }
+              const result = await client.query(sql, values)
+              if (shouldGate) {
+                acquired.resolve()
+                await resume.promise
+              }
+              return result
+            },
+            release: () => client.release(),
+          }
+        },
+      }),
+      resume: resume.resolve,
+    }
+  }
+
+  function exclusiveLockGate() {
+    return gatedProvider(sql => sql.includes('pg_advisory_xact_lock('))
+  }
+
+  function sharedLockGate() {
+    return gatedProvider(sql => sql.includes('pg_advisory_xact_lock_shared('))
   }
 
   async function query(sql, values = []) {
@@ -155,6 +207,43 @@ describeWithPostgres('recurring availability repository', () => {
     }
   }
 
+  async function insertAppointment(slotId, status = 'booked') {
+    const cancellationColumns = status === 'cancelled'
+      ? ', cancelled_by_user_id, cancelled_at'
+      : ''
+    const cancellationValues = status === 'cancelled' ? ', $4, $5' : ''
+    const values = status === 'cancelled'
+      ? [patientId, slotId, status, patientId, now]
+      : [patientId, slotId, status]
+    const result = await query(
+      `INSERT INTO appointments (
+         patient_id, slot_id, status${cancellationColumns}
+       ) VALUES ($1, $2, $3${cancellationValues})
+       RETURNING id`,
+      values,
+    )
+    return Number(result.rows[0].id)
+  }
+
+  async function generatedRows(ruleId) {
+    const result = await query(
+      `SELECT
+         block.id AS block_id,
+         block.start_at AS block_start_at,
+         block.end_at AS block_end_at,
+         slot.id AS slot_id,
+         slot.start_at AS slot_start_at,
+         slot.end_at AS slot_end_at,
+         slot.is_active
+       FROM availability_blocks block
+       LEFT JOIN slots slot ON slot.availability_block_id = block.id
+       WHERE block.recurring_rule_id = $1
+       ORDER BY block.start_at, slot.start_at`,
+      [ruleId],
+    )
+    return result.rows
+  }
+
   beforeAll(async () => {
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
@@ -190,6 +279,7 @@ describeWithPostgres('recurring availability repository', () => {
 
     provider = () => ({ connect: schemaClient })
     repository = createAvailabilityRepository(provider)
+    appointmentRepository = createAppointmentRepository(provider)
     doctorId = await insertDoctor('approved')
     otherDoctorId = await insertDoctor('other')
     disabledDoctorId = await insertDoctor('disabled', { enabled: false })
@@ -306,6 +396,493 @@ describeWithPostgres('recurring availability repository', () => {
     })
     await expect(repository.listRecurringForDoctor(pendingDoctorId)).rejects.toMatchObject({
       code: 'DOCTOR_NOT_APPROVED',
+    })
+  })
+
+  it('stops a rule and deletes fully future occurrences with no appointment history', async () => {
+    const created = await create({ endsOn: '2026-09-28' })
+    const beforeRule = await query(
+      'SELECT materialized_through FROM recurring_availability_rules WHERE id = $1',
+      [created.rule.id],
+    )
+
+    await repository.stopRecurring({ doctorId, ruleId: created.rule.id, now })
+
+    const rule = await query(
+      'SELECT status, materialized_through FROM recurring_availability_rules WHERE id = $1',
+      [created.rule.id],
+    )
+    expect(rule.rows[0]).toMatchObject({ status: 'stopped' })
+    expect(rule.rows[0].materialized_through).toEqual(beforeRule.rows[0].materialized_through)
+    await expect(generatedRows(created.rule.id)).resolves.toEqual([])
+  })
+
+  it('preserves a booked appointment and its rows while deactivating the stopped occurrence', async () => {
+    const created = await create({ endsOn: '2026-09-21' })
+    const before = await generatedRows(created.rule.id)
+    const appointmentId = await insertAppointment(before[0].slot_id, 'booked')
+
+    await repository.stopRecurring({ doctorId, ruleId: created.rule.id, now })
+
+    const rows = await generatedRows(created.rule.id)
+    const appointment = await query('SELECT slot_id, status FROM appointments WHERE id = $1', [appointmentId])
+    expect(rows).toHaveLength(before.length)
+    expect(rows.every(row => row.is_active === false)).toBe(true)
+    expect(appointment.rows[0]).toMatchObject({ slot_id: before[0].slot_id, status: 'booked' })
+  })
+
+  it.each(['cancelled', 'completed', 'no_show', 'rescheduled'])(
+    'preserves %s appointment history and deactivates every future slot',
+    async status => {
+      const created = await create({ endsOn: '2026-09-21' })
+      const before = await generatedRows(created.rule.id)
+      const appointmentId = await insertAppointment(before[0].slot_id, status)
+
+      await repository.stopRecurring({ doctorId, ruleId: created.rule.id, now })
+
+      const rows = await generatedRows(created.rule.id)
+      const appointment = await query('SELECT status FROM appointments WHERE id = $1', [appointmentId])
+      expect(rows).toHaveLength(before.length)
+      expect(rows.every(row => row.is_active === false)).toBe(true)
+      expect(appointment.rows[0].status).toBe(status)
+    },
+  )
+
+  it('cleans a mixed rule by deleting unused occurrences and retaining the protected occurrence', async () => {
+    const created = await create()
+    const before = await generatedRows(created.rule.id)
+    const blockIds = [...new Set(before.map(row => Number(row.block_id)))]
+    const protectedBlockId = blockIds[1]
+    const protectedSlot = before.find(row => Number(row.block_id) === protectedBlockId)
+    await insertAppointment(protectedSlot.slot_id, 'cancelled')
+
+    await repository.stopRecurring({ doctorId, ruleId: created.rule.id, now })
+
+    const rows = await generatedRows(created.rule.id)
+    expect(new Set(rows.map(row => Number(row.block_id)))).toEqual(new Set([protectedBlockId]))
+    expect(rows.every(row => row.is_active === false)).toBe(true)
+  })
+
+  it('preserves a partially elapsed occurrence and deactivates its remaining slots', async () => {
+    const created = await create({
+      weekdays: [4],
+      startTime: '05:00',
+      endTime: '07:00',
+      startsOn: '2026-09-17',
+      endsOn: '2026-09-17',
+    }, new Date('2026-09-16T00:00:00.000Z'))
+
+    await repository.stopRecurring({ doctorId, ruleId: created.rule.id, now })
+
+    const rows = await generatedRows(created.rule.id)
+    expect(rows).toHaveLength(4)
+    expect(rows.filter(row => new Date(row.slot_end_at) <= now).every(row => row.is_active)).toBe(true)
+    expect(rows.filter(row => new Date(row.slot_end_at) > now).every(row => !row.is_active)).toBe(true)
+  })
+
+  it('leaves a fully past occurrence unchanged for history', async () => {
+    const created = await create({
+      weekdays: [2],
+      startsOn: '2026-09-15',
+      endsOn: '2026-09-15',
+    }, new Date('2026-09-14T00:00:00.000Z'))
+    const before = await generatedRows(created.rule.id)
+
+    await repository.stopRecurring({ doctorId, ruleId: created.rule.id, now })
+
+    const after = await generatedRows(created.rule.id)
+    expect(after).toEqual(before)
+  })
+
+  it('keeps a stopped slot inactive when its booked appointment is later cancelled', async () => {
+    const created = await create({ endsOn: '2026-09-21' })
+    const [slot] = await generatedRows(created.rule.id)
+    const appointmentId = await insertAppointment(slot.slot_id, 'booked')
+    await repository.stopRecurring({ doctorId, ruleId: created.rule.id, now })
+
+    await appointmentRepository.cancel({
+      appointmentId,
+      actorId: patientId,
+      actorRole: 'patient',
+      now,
+    })
+
+    const state = await query(
+      `SELECT appointment.status, slot.is_active
+       FROM appointments appointment
+       JOIN slots slot ON slot.id = appointment.slot_id
+       WHERE appointment.id = $1`,
+      [appointmentId],
+    )
+    expect(state.rows[0]).toEqual({ status: 'cancelled', is_active: false })
+  })
+
+  it('allows replacement after stop unless a booked appointment still occupies the time', async () => {
+    const unused = await create({ endsOn: '2026-09-21' })
+    await repository.stopRecurring({ doctorId, ruleId: unused.rule.id, now })
+    const replacement = await create({ endsOn: '2026-09-21' })
+    expect(replacement.rule.id).toBeGreaterThan(0)
+
+    const rows = await generatedRows(replacement.rule.id)
+    await insertAppointment(rows[0].slot_id, 'booked')
+    await repository.stopRecurring({ doctorId, ruleId: replacement.rule.id, now })
+    await expect(create({ endsOn: '2026-09-21' }))
+      .rejects.toMatchObject({ code: 'AVAILABILITY_OVERLAP' })
+  })
+
+  it('is idempotent and hides another Doctor rule behind safe not-found', async () => {
+    const created = await create({ endsOn: '2026-09-21' })
+    await repository.stopRecurring({ doctorId, ruleId: created.rule.id, now })
+    await expect(repository.stopRecurring({ doctorId, ruleId: created.rule.id, now })).resolves.toBeUndefined()
+    await expect(repository.materializeRecurring({ doctorId, ruleId: created.rule.id }, now))
+      .rejects.toMatchObject({ code: 'RECURRING_AVAILABILITY_RULE_NOT_FOUND' })
+    await expect(repository.stopRecurring({ doctorId: otherDoctorId, ruleId: created.rule.id, now }))
+      .rejects.toMatchObject({ code: 'RECURRING_AVAILABILITY_RULE_NOT_FOUND' })
+  })
+
+  it.each([
+    ['disabled', () => disabledDoctorId, 'ACCOUNT_DISABLED'],
+    ['unapproved', () => pendingDoctorId, 'DOCTOR_NOT_APPROVED'],
+  ])('rechecks %s Doctor eligibility before stopping', async (_label, resolveDoctorId, code) => {
+    await expect(repository.stopRecurring({ doctorId: resolveDoctorId(), ruleId: 99999, now }))
+      .rejects.toMatchObject({ code })
+  })
+
+  it('rolls back status and cleanup if retiring an unused occurrence fails', async () => {
+    const created = await create({ endsOn: '2026-09-21' })
+    const before = await generatedRows(created.rule.id)
+    await query(`
+      CREATE FUNCTION fail_recurring_stop_cleanup() RETURNS trigger AS $failure$
+      BEGIN
+        RAISE EXCEPTION 'simulated recurring stop failure';
+      END
+      $failure$ LANGUAGE plpgsql
+    `)
+    await query(`
+      CREATE TRIGGER fail_recurring_stop_cleanup
+      BEFORE DELETE ON slots
+      FOR EACH ROW EXECUTE FUNCTION fail_recurring_stop_cleanup()
+    `)
+
+    try {
+      await expect(repository.stopRecurring({ doctorId, ruleId: created.rule.id, now }))
+        .rejects.toThrow('simulated recurring stop failure')
+      const rule = await query('SELECT status FROM recurring_availability_rules WHERE id = $1', [created.rule.id])
+      const after = await generatedRows(created.rule.id)
+      expect(rule.rows[0].status).toBe('active')
+      expect(after).toEqual(before)
+    } finally {
+      await query('DROP TRIGGER fail_recurring_stop_cleanup ON slots')
+      await query('DROP FUNCTION fail_recurring_stop_cleanup()')
+    }
+  })
+
+  it('takes the exclusive Doctor lock before rule and occurrence row locks', async () => {
+    const created = await create({ endsOn: '2026-09-21' })
+    const statements = []
+    const recordingRepository = createAvailabilityRepository(() => ({
+      async connect() {
+        const client = await schemaClient()
+        return {
+          query(sql, values) {
+            statements.push(normalizeSql(sql))
+            return client.query(sql, values)
+          },
+          release: () => client.release(),
+        }
+      },
+    }))
+
+    await recordingRepository.stopRecurring({ doctorId, ruleId: created.rule.id, now })
+    const advisoryLock = statements.findIndex(sql => sql.includes('pg_advisory_xact_lock('))
+    const ruleLock = statements.findIndex(sql => sql.includes('FROM recurring_availability_rules') && sql.endsWith('FOR UPDATE'))
+    const blockLock = statements.findIndex(sql => sql.includes('FROM availability_blocks block') && sql.endsWith('FOR UPDATE OF block'))
+
+    expect(advisoryLock).toBeGreaterThanOrEqual(0)
+    expect(advisoryLock).toBeLessThan(ruleLock)
+    expect(advisoryLock).toBeLessThan(blockLock)
+  })
+
+  async function setupRescheduleRace() {
+    const originalBlock = await query(
+      `INSERT INTO availability_blocks (doctor_id, start_at, end_at)
+       VALUES ($1, '2026-09-22T14:00:00+05:30', '2026-09-22T14:30:00+05:30')
+       RETURNING id`,
+      [doctorId],
+    )
+    const originalSlot = await query(
+      `INSERT INTO slots (availability_block_id, start_at, end_at)
+       VALUES ($1, '2026-09-22T14:00:00+05:30', '2026-09-22T14:30:00+05:30')
+       RETURNING id`,
+      [originalBlock.rows[0].id],
+    )
+    const original = await appointmentRepository.book({
+      patientId,
+      patientName: 'Recurring Patient',
+      slotId: Number(originalSlot.rows[0].id),
+    })
+    const targetRule = await create({ endsOn: '2026-09-21' })
+    const [targetSlot] = await generatedRows(targetRule.rule.id)
+
+    return { original, originalSlot: originalSlot.rows[0], targetRule, targetSlot }
+  }
+
+  it('waits for a booking that already holds the shared Doctor lock, then preserves it', async () => {
+    const created = await create({ endsOn: '2026-09-21' })
+    const [slot] = await generatedRows(created.rule.id)
+    const bookingGate = sharedLockGate()
+    const stopGate = exclusiveLockGate()
+    const controlledAppointments = createAppointmentRepository(bookingGate.provider)
+    const controlledAvailability = createAvailabilityRepository(stopGate.provider)
+
+    const booking = controlledAppointments.book({
+      patientId,
+      patientName: 'Recurring Patient',
+      slotId: Number(slot.slot_id),
+    })
+    await bookingGate.acquired
+    const stopping = controlledAvailability.stopRecurring({ doctorId, ruleId: created.rule.id, now })
+    await stopGate.attempted
+
+    stopGate.resume()
+    bookingGate.resume()
+    await expect(booking).resolves.toMatchObject({ status: 'booked' })
+    await expect(stopping).resolves.toBeUndefined()
+
+    const state = await query(
+      `SELECT block.id AS block_id, slot.id AS slot_id, slot.is_active, appointment.status
+       FROM availability_blocks block
+       JOIN slots slot ON slot.availability_block_id = block.id
+       JOIN appointments appointment ON appointment.slot_id = slot.id
+       WHERE block.id = $1 AND slot.id = $2`,
+      [slot.block_id, slot.slot_id],
+    )
+    expect(state.rows[0]).toEqual({
+      block_id: slot.block_id,
+      slot_id: slot.slot_id,
+      is_active: false,
+      status: 'booked',
+    })
+  })
+
+  it('makes a booking wait behind stop, then fail without creating an appointment', async () => {
+    const created = await create({ endsOn: '2026-09-21' })
+    const [slot] = await generatedRows(created.rule.id)
+    const stopGate = exclusiveLockGate()
+    const bookingGate = sharedLockGate()
+    const controlledAvailability = createAvailabilityRepository(stopGate.provider)
+    const controlledAppointments = createAppointmentRepository(bookingGate.provider)
+
+    const stopping = controlledAvailability.stopRecurring({ doctorId, ruleId: created.rule.id, now })
+    await stopGate.acquired
+    const booking = controlledAppointments.book({
+      patientId,
+      patientName: 'Recurring Patient',
+      slotId: Number(slot.slot_id),
+    })
+    await bookingGate.attempted
+
+    bookingGate.resume()
+    stopGate.resume()
+    await expect(stopping).resolves.toBeUndefined()
+    await expect(booking).rejects.toMatchObject({ code: 'SLOT_UNAVAILABLE' })
+
+    const state = await query(
+      `SELECT
+         EXISTS (SELECT 1 FROM availability_blocks WHERE id = $1) AS block_exists,
+         EXISTS (SELECT 1 FROM slots WHERE id = $2) AS slot_exists,
+         EXISTS (SELECT 1 FROM appointments WHERE slot_id = $2) AS appointment_exists`,
+      [slot.block_id, slot.slot_id],
+    )
+    expect(state.rows[0]).toEqual({ block_exists: false, slot_exists: false, appointment_exists: false })
+  })
+
+  it('waits for a reschedule that holds the shared Doctor lock, then preserves its replacement', async () => {
+    const { original, originalSlot, targetRule, targetSlot } = await setupRescheduleRace()
+    const rescheduleGate = sharedLockGate()
+    const stopGate = exclusiveLockGate()
+    const controlledAppointments = createAppointmentRepository(rescheduleGate.provider)
+    const controlledAvailability = createAvailabilityRepository(stopGate.provider)
+
+    const reschedule = controlledAppointments.reschedule({
+      appointmentId: Number(original.id),
+      patientId,
+      slotId: Number(targetSlot.slot_id),
+      now,
+    })
+    await rescheduleGate.acquired
+    const stopping = controlledAvailability.stopRecurring({ doctorId, ruleId: targetRule.rule.id, now })
+    await stopGate.attempted
+
+    stopGate.resume()
+    rescheduleGate.resume()
+    await expect(reschedule).resolves.toMatchObject({ status: 'booked' })
+    await expect(stopping).resolves.toBeUndefined()
+
+    const appointments = await query(
+      `SELECT slot_id, status, rescheduled_from_appointment_id
+       FROM appointments
+       WHERE id = $1 OR rescheduled_from_appointment_id = $1
+       ORDER BY id`,
+      [original.id],
+    )
+    expect(appointments.rows).toEqual([
+      expect.objectContaining({ status: 'rescheduled', slot_id: originalSlot.id }),
+      expect.objectContaining({
+        status: 'booked',
+        slot_id: targetSlot.slot_id,
+        rescheduled_from_appointment_id: original.id,
+      }),
+    ])
+    const targetState = await query('SELECT is_active FROM slots WHERE id = $1', [targetSlot.slot_id])
+    expect(targetState.rows[0]).toEqual({ is_active: false })
+  })
+
+  it('makes rescheduling wait behind stop, then fail without changing the original appointment', async () => {
+    const { original, originalSlot, targetRule, targetSlot } = await setupRescheduleRace()
+    const stopGate = exclusiveLockGate()
+    const rescheduleGate = sharedLockGate()
+    const controlledAvailability = createAvailabilityRepository(stopGate.provider)
+    const controlledAppointments = createAppointmentRepository(rescheduleGate.provider)
+
+    const stopping = controlledAvailability.stopRecurring({ doctorId, ruleId: targetRule.rule.id, now })
+    await stopGate.acquired
+    const reschedule = controlledAppointments.reschedule({
+      appointmentId: Number(original.id),
+      patientId,
+      slotId: Number(targetSlot.slot_id),
+      now,
+    })
+    await rescheduleGate.attempted
+
+    rescheduleGate.resume()
+    stopGate.resume()
+    await expect(stopping).resolves.toBeUndefined()
+    await expect(reschedule).rejects.toMatchObject({ code: 'SLOT_UNAVAILABLE' })
+
+    const appointments = await query(
+      `SELECT slot_id, status, rescheduled_from_appointment_id
+       FROM appointments
+       WHERE id = $1 OR rescheduled_from_appointment_id = $1
+       ORDER BY id`,
+      [original.id],
+    )
+    expect(appointments.rows).toEqual([
+      expect.objectContaining({ status: 'booked', slot_id: originalSlot.id }),
+    ])
+    const targetState = await query('SELECT id FROM slots WHERE id = $1', [targetSlot.slot_id])
+    expect(targetState.rows).toEqual([])
+  })
+
+  it('waits for materialization holding the exclusive lock, then removes its new occurrences', async () => {
+    const created = await create({ endsOn: null })
+    const originalCursor = created.rule.materializedThrough
+    const materializeGate = exclusiveLockGate()
+    const stopGate = exclusiveLockGate()
+    const controlledMaterializer = createAvailabilityRepository(materializeGate.provider)
+    const controlledStopper = createAvailabilityRepository(stopGate.provider)
+    const extensionTime = new Date('2026-10-01T00:00:00.000Z')
+
+    const materializing = controlledMaterializer.materializeRecurring(
+      { doctorId, ruleId: created.rule.id },
+      extensionTime,
+    )
+    await materializeGate.acquired
+    const stopping = controlledStopper.stopRecurring({ doctorId, ruleId: created.rule.id, now: extensionTime })
+    await stopGate.attempted
+
+    stopGate.resume()
+    materializeGate.resume()
+    const materialized = await materializing
+    await expect(stopping).resolves.toBeUndefined()
+    expect(materialized.rule.materializedThrough > originalCursor).toBe(true)
+
+    const state = await query(
+      `SELECT
+         rule.status,
+         to_char(rule.materialized_through, 'YYYY-MM-DD') AS cursor,
+         COUNT(block.id)::int AS blocks,
+         COUNT(block.id) FILTER (WHERE block.start_at > $2)::int AS future_blocks,
+         COUNT(block.id) FILTER (
+           WHERE EXISTS (
+             SELECT 1 FROM slots slot
+             WHERE slot.availability_block_id = block.id
+               AND slot.is_active
+               AND slot.start_at > $2
+           )
+         )::int AS bookable_blocks,
+         (SELECT COUNT(*)::int FROM appointments) AS appointments
+       FROM recurring_availability_rules rule
+       LEFT JOIN availability_blocks block ON block.recurring_rule_id = rule.id
+       WHERE rule.id = $1
+       GROUP BY rule.id`,
+      [created.rule.id, extensionTime],
+    )
+    expect(state.rows[0]).toMatchObject({
+      status: 'stopped',
+      cursor: materialized.rule.materializedThrough,
+      blocks: 2,
+      future_blocks: 0,
+      bookable_blocks: 0,
+      appointments: 0,
+    })
+  })
+
+  it('makes materialization wait behind stop, then rejects it without advancing the cursor', async () => {
+    const created = await create({ endsOn: null })
+    const before = await query(
+      `SELECT to_char(materialized_through, 'YYYY-MM-DD') AS cursor
+       FROM recurring_availability_rules
+       WHERE id = $1`,
+      [created.rule.id],
+    )
+    const stopGate = exclusiveLockGate()
+    const materializeGate = exclusiveLockGate()
+    const controlledStopper = createAvailabilityRepository(stopGate.provider)
+    const controlledMaterializer = createAvailabilityRepository(materializeGate.provider)
+    const extensionTime = new Date('2026-10-01T00:00:00.000Z')
+
+    const stopping = controlledStopper.stopRecurring({ doctorId, ruleId: created.rule.id, now: extensionTime })
+    await stopGate.acquired
+    const materializing = controlledMaterializer.materializeRecurring(
+      { doctorId, ruleId: created.rule.id },
+      extensionTime,
+    )
+    await materializeGate.attempted
+
+    materializeGate.resume()
+    stopGate.resume()
+    await expect(stopping).resolves.toBeUndefined()
+    await expect(materializing).rejects.toMatchObject({ code: 'RECURRING_AVAILABILITY_RULE_NOT_FOUND' })
+
+    const state = await query(
+      `SELECT
+         rule.status,
+         to_char(rule.materialized_through, 'YYYY-MM-DD') AS cursor,
+         COUNT(block.id)::int AS blocks,
+         COUNT(block.id) FILTER (WHERE block.start_at > $2)::int AS future_blocks,
+         COUNT(block.id) FILTER (
+           WHERE EXISTS (
+             SELECT 1 FROM slots slot
+             WHERE slot.availability_block_id = block.id
+               AND slot.is_active
+               AND slot.start_at > $2
+           )
+         )::int AS bookable_blocks,
+         (SELECT COUNT(*)::int FROM appointments) AS appointments
+       FROM recurring_availability_rules rule
+       LEFT JOIN availability_blocks block ON block.recurring_rule_id = rule.id
+       WHERE rule.id = $1
+       GROUP BY rule.id`,
+      [created.rule.id, extensionTime],
+    )
+    expect(state.rows[0]).toMatchObject({
+      status: 'stopped',
+      cursor: before.rows[0].cursor,
+      blocks: 2,
+      future_blocks: 0,
+      bookable_blocks: 0,
+      appointments: 0,
     })
   })
 

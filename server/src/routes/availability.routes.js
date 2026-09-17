@@ -10,6 +10,7 @@ export function createDoctorAvailabilityRouter(service, authenticate) {
   router.post('/me/availability', authenticate, authorizeRoles('doctor'), controller.create)
   router.get('/me/availability/rules', authenticate, authorizeRoles('doctor'), controller.listRecurring)
   router.post('/me/availability/rules', authenticate, authorizeRoles('doctor'), controller.createRecurring)
+  router.delete('/me/availability/rules/:ruleId', authenticate, authorizeRoles('doctor'), controller.stopRecurring)
   router.delete('/me/availability/:blockId', authenticate, authorizeRoles('doctor'), controller.remove)
 
   return router

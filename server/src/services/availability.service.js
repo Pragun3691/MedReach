@@ -31,6 +31,10 @@ function translateDataError(error) {
     throw new AppError(400, 'RECURRING_AVAILABILITY_IN_PAST', 'Recurring availability must include a future occurrence')
   }
 
+  if (error.code === 'RECURRING_AVAILABILITY_RULE_NOT_FOUND') {
+    throw new AppError(404, 'RECURRING_AVAILABILITY_RULE_NOT_FOUND', 'Recurring availability rule not found')
+  }
+
   if (error.code === 'AVAILABILITY_BLOCK_NOT_FOUND') {
     throw new AppError(404, 'AVAILABILITY_BLOCK_NOT_FOUND', 'Availability block not found')
   }
@@ -176,6 +180,14 @@ export function createAvailabilityService(repository = availabilityRepository, c
         }, clock())
 
         return recurringRule(result.rule, result.materialized.length)
+      } catch (error) {
+        translateDataError(error)
+      }
+    },
+
+    async stopRecurring(doctorId, ruleId) {
+      try {
+        await repository.stopRecurring({ doctorId, ruleId, now: clock() })
       } catch (error) {
         translateDataError(error)
       }

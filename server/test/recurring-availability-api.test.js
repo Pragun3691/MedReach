@@ -101,6 +101,15 @@ function createTestContext() {
         .map(ruleRow)
     },
 
+    async stopRecurring({ doctorId, ruleId }) {
+      ensureEligible(doctorId)
+      if (failure) throw failure
+      const rule = rules.find(item => item.id === ruleId && item.doctorId === doctorId)
+      if (!rule) throw new AvailabilityDataError('RECURRING_AVAILABILITY_RULE_NOT_FOUND')
+      rule.status = 'stopped'
+      rule.materializedOccurrenceCount = 0
+    },
+
     async listForDoctor(doctorId) {
       ensureEligible(doctorId)
       return []
@@ -408,5 +417,102 @@ describe('recurring availability list API', () => {
     expect(created.status).toBe(201)
     expect(listed.status).toBe(200)
     expect(removed.status).toBe(204)
+  })
+})
+
+describe('recurring availability stop API', () => {
+  let context
+
+  beforeEach(() => {
+    context = createTestContext()
+  })
+
+  async function createRule(agent, input = validInput) {
+    const response = await agent.post('/api/doctors/me/availability/rules').send(input)
+    expect(response.status).toBe(201)
+    return response.body.rule
+  }
+
+  it('lets the owner stop an active rule and keeps it listed as stopped', async () => {
+    const doctor = await login(context.app, 'approved@example.test')
+    const rule = await createRule(doctor)
+
+    const stopped = await doctor.delete(`/api/doctors/me/availability/rules/${rule.id}`)
+    const listed = await doctor.get('/api/doctors/me/availability/rules')
+
+    expect(stopped.status).toBe(204)
+    expect(stopped.text).toBe('')
+    expect(listed.body.items).toEqual([
+      expect.objectContaining({ id: rule.id, status: 'stopped' }),
+    ])
+  })
+
+  it('is idempotent for an already-stopped owned rule', async () => {
+    const doctor = await login(context.app, 'approved@example.test')
+    const rule = await createRule(doctor)
+
+    expect((await doctor.delete(`/api/doctors/me/availability/rules/${rule.id}`)).status).toBe(204)
+    expect((await doctor.delete(`/api/doctors/me/availability/rules/${rule.id}`)).status).toBe(204)
+  })
+
+  it('returns the same safe not-found error for unknown and another Doctor rule', async () => {
+    const owner = await login(context.app, 'approved@example.test')
+    const other = await login(context.app, 'other@example.test')
+    const rule = await createRule(owner)
+
+    for (const ruleId of [rule.id, 99999]) {
+      const response = await other.delete(`/api/doctors/me/availability/rules/${ruleId}`)
+      expect(response.status).toBe(404)
+      expect(response.body.error.code).toBe('RECURRING_AVAILABILITY_RULE_NOT_FOUND')
+    }
+    expect(context.rules[0].status).toBe('active')
+  })
+
+  it.each(['pending@example.test', 'rejected@example.test'])(
+    'rejects a non-approved Doctor (%s)',
+    async email => {
+      const doctor = await login(context.app, email)
+      const response = await doctor.delete('/api/doctors/me/availability/rules/1')
+
+      expect(response.status).toBe(403)
+      expect(response.body.error.code).toBe('DOCTOR_NOT_APPROVED')
+    },
+  )
+
+  it('rejects a disabled Doctor and a non-Doctor', async () => {
+    const disabled = await login(context.app, 'disabled@example.test')
+    context.users.find(user => user.id === 14).isEnabled = false
+    const disabledResponse = await disabled.delete('/api/doctors/me/availability/rules/1')
+    const patient = await login(context.app, 'patient@example.test')
+    const patientResponse = await patient.delete('/api/doctors/me/availability/rules/1')
+
+    expect(disabledResponse.status).toBe(403)
+    expect(disabledResponse.body.error.code).toBe('ACCOUNT_DISABLED')
+    expect(patientResponse.status).toBe(403)
+    expect(patientResponse.body.error.code).toBe('ROLE_FORBIDDEN')
+  })
+
+  it('requires authentication and validates the rule id', async () => {
+    const anonymous = await request(context.app).delete('/api/doctors/me/availability/rules/1')
+    const doctor = await login(context.app, 'approved@example.test')
+    const invalid = await doctor.delete('/api/doctors/me/availability/rules/not-a-rule')
+
+    expect(anonymous.status).toBe(401)
+    expect(invalid.status).toBe(400)
+    expect(invalid.body.error.code).toBe('VALIDATION_ERROR')
+  })
+
+  it('does not expose an unexpected repository failure', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const doctor = await login(context.app, 'approved@example.test')
+    const rule = await createRule(doctor)
+    context.failWith(new Error('stop database secret'))
+
+    const response = await doctor.delete(`/api/doctors/me/availability/rules/${rule.id}`)
+
+    expect(response.status).toBe(500)
+    expect(response.body).toEqual({ error: { code: 'INTERNAL_SERVER_ERROR', message: 'Something went wrong' } })
+    expect(JSON.stringify(response.body)).not.toContain('stop database secret')
+    expect(context.rules[0].status).toBe('active')
   })
 })

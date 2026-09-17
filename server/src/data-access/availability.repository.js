@@ -521,6 +521,93 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
       })
     },
 
+    async stopRecurring({ doctorId, ruleId, now = new Date() }) {
+      return withTransaction(databaseProvider, async client => {
+        await lockDoctorForAvailability(client, doctorId)
+
+        const ruleResult = await client.query(
+          `SELECT id, status
+           FROM recurring_availability_rules
+           WHERE id = $1
+             AND doctor_id = $2
+           FOR UPDATE`,
+          [ruleId, doctorId],
+        )
+        if (!ruleResult.rows[0]) {
+          throw new AvailabilityDataError('RECURRING_AVAILABILITY_RULE_NOT_FOUND')
+        }
+
+        await client.query(
+          `UPDATE recurring_availability_rules
+           SET status = 'stopped', updated_at = current_timestamp
+           WHERE id = $1
+             AND doctor_id = $2
+             AND status = 'active'`,
+          [ruleId, doctorId],
+        )
+
+        await client.query(
+          `SELECT block.id
+           FROM availability_blocks block
+           WHERE block.recurring_rule_id = $1
+             AND block.doctor_id = $2
+           ORDER BY block.id
+           FOR UPDATE OF block`,
+          [ruleId, doctorId],
+        )
+        await client.query(
+          `SELECT slot.id
+           FROM slots slot
+           JOIN availability_blocks block ON block.id = slot.availability_block_id
+           WHERE block.recurring_rule_id = $1
+             AND block.doctor_id = $2
+           ORDER BY slot.id
+           FOR UPDATE OF slot`,
+          [ruleId, doctorId],
+        )
+
+        await client.query(
+          `UPDATE slots slot
+           SET is_active = FALSE
+           FROM availability_blocks block
+           WHERE block.id = slot.availability_block_id
+             AND block.recurring_rule_id = $1
+             AND block.doctor_id = $2
+             AND slot.end_at > $3`,
+          [ruleId, doctorId, now],
+        )
+
+        await client.query(
+          `DELETE FROM slots slot
+           USING availability_blocks block
+           WHERE block.id = slot.availability_block_id
+             AND block.recurring_rule_id = $1
+             AND block.doctor_id = $2
+             AND block.start_at > $3
+             AND NOT EXISTS (
+               SELECT 1
+               FROM appointments appointment
+               JOIN slots history_slot ON history_slot.id = appointment.slot_id
+               WHERE history_slot.availability_block_id = block.id
+             )`,
+          [ruleId, doctorId, now],
+        )
+
+        await client.query(
+          `DELETE FROM availability_blocks block
+           WHERE block.recurring_rule_id = $1
+             AND block.doctor_id = $2
+             AND block.start_at > $3
+             AND NOT EXISTS (
+               SELECT 1
+               FROM slots slot
+               WHERE slot.availability_block_id = block.id
+             )`,
+          [ruleId, doctorId, now],
+        )
+      })
+    },
+
     async remove({ doctorId, blockId, now }) {
       return withTransaction(databaseProvider, async client => {
         await lockDoctorForAvailability(client, doctorId)

@@ -2,6 +2,7 @@ import {
   availabilityBlockIdSchema,
   createAvailabilitySchema,
   createRecurringAvailabilitySchema,
+  recurringAvailabilityRuleIdSchema,
 } from '../validation/availability.schemas.js'
 
 export function createAvailabilityController(service) {
@@ -30,6 +31,13 @@ export function createAvailabilityController(service) {
       const rule = await service.createRecurring(request.authUser.id, input)
 
       response.status(201).json({ rule })
+    },
+
+    async stopRecurring(request, response) {
+      const ruleId = recurringAvailabilityRuleIdSchema.parse(request.params.ruleId)
+      await service.stopRecurring(request.authUser.id, ruleId)
+
+      response.status(204).send()
     },
 
     async remove(request, response) {
