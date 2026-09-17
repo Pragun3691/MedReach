@@ -3,6 +3,7 @@ import { ProtectedRoute } from './components/ProtectedRoute.jsx'
 import { AppointmentDetailPage } from './pages/AppointmentDetailPage.jsx'
 import { AppointmentsPage } from './pages/AppointmentsPage.jsx'
 import { DoctorAppointmentsPage } from './pages/DoctorAppointmentsPage.jsx'
+import { DoctorAvailabilityPage } from './pages/DoctorAvailabilityPage.jsx'
 import { DoctorProfilePage } from './pages/DoctorProfilePage.jsx'
 import { DoctorResultsPage } from './pages/DoctorResultsPage.jsx'
 import { HomePage } from './pages/HomePage.jsx'
@@ -49,6 +50,10 @@ function App() {
       <Route
         path="/doctor/appointments"
         element={<ProtectedRoute allowedRoles={['doctor']}><DoctorAppointmentsPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/doctor/availability"
+        element={<ProtectedRoute allowedRoles={['doctor']}><DoctorAvailabilityPage /></ProtectedRoute>}
       />
       <Route
         path="/notifications"

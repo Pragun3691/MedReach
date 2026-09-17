@@ -18,6 +18,8 @@ async function requestJson(path, { signal, ...options } = {}) {
     throw error
   }
 
+  if (response.status === 204) return null
+
   return response.json()
 }
 
@@ -81,6 +83,21 @@ export function listPatientAppointments(signal) {
 
 export function listDoctorAppointments(signal) {
   return requestJson('/api/doctors/me/appointments', { signal })
+}
+
+export function listDoctorAvailability(signal) {
+  return requestJson('/api/doctors/me/availability', { signal })
+}
+
+export function createDoctorAvailability(availability) {
+  return requestJson('/api/doctors/me/availability', {
+    method: 'POST',
+    body: JSON.stringify(availability),
+  })
+}
+
+export function deleteDoctorAvailability(blockId) {
+  return requestJson(`/api/doctors/me/availability/${blockId}`, { method: 'DELETE' })
 }
 
 export function getAppointment(appointmentId, signal) {

@@ -111,6 +111,7 @@ export function PublicHeader({ overlay = false, editorial = false, forceEnglish 
         <nav className="public-header-nav flex items-center gap-3 sm:gap-5 lg:gap-8" aria-label={t('navigation.primary')}>
           {currentUser?.role !== 'doctor' && <NavLink className={({ isActive }) => `hidden md:block ${navigationClass({ isActive }, inverse, editorial)}`} to="/doctors">{t('navigation.findDoctors')}</NavLink>}
           {status === 'authenticated' && currentUser && <NavLink className={({ isActive }) => `hidden md:block ${navigationClass({ isActive }, inverse, editorial)}`} to={appointmentPath}>{appointmentLabel}</NavLink>}
+          {currentUser?.role === 'doctor' && <NavLink className={({ isActive }) => `hidden md:block ${navigationClass({ isActive }, inverse, editorial)}`} to="/doctor/availability">Availability</NavLink>}
           {patientFacing && <LanguageControl className={status === 'authenticated' ? 'patient-header-language--desktop hidden md:inline-flex' : ''} inverse={inverse} />}
           {status === 'loading' && <span className={`h-10 w-28 animate-pulse rounded-lg ${inverse ? 'bg-white/15' : 'bg-slate-100'}`} aria-label={t('navigation.checkingSession')} />}
           {status === 'anonymous' && (
@@ -139,6 +140,7 @@ export function PublicHeader({ overlay = false, editorial = false, forceEnglish 
           {currentUser.role === 'patient' && <LanguageControl inverse={inverse} />}
           {currentUser.role !== 'doctor' && <NavLink className={({ isActive }) => navigationClass({ isActive }, inverse, editorial)} to="/doctors">{t('navigation.findDoctors')}</NavLink>}
           <NavLink className={({ isActive }) => navigationClass({ isActive }, inverse, editorial)} to={appointmentPath}>{appointmentLabel}</NavLink>
+          {currentUser.role === 'doctor' && <NavLink className={({ isActive }) => navigationClass({ isActive }, inverse, editorial)} to="/doctor/availability">Availability</NavLink>}
           <span className={`ml-auto truncate text-xs ${inverse ? 'text-white/60' : 'text-slate-500'}`}>{t('navigation.greeting')} {firstName(currentUser.fullName)}</span>
         </nav>
       )}
