@@ -415,6 +415,39 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
       return result.rows.filter(row => row.rule_id !== null)
     },
 
+    async listRecurringRulesForExtension(now = new Date()) {
+      const client = await databaseProvider().connect()
+      try {
+        const result = await client.query(
+          `WITH horizon AS (
+             SELECT (($1::timestamptz AT TIME ZONE 'Asia/Kolkata')::date + 90) AS target_date
+           )
+           SELECT
+             recurring_rule.id AS rule_id,
+             recurring_rule.doctor_id,
+             recurring_rule.materialized_through,
+             recurring_rule.ends_on,
+             LEAST(
+               COALESCE(recurring_rule.ends_on, horizon.target_date),
+               horizon.target_date
+             ) AS target_through,
+             recurring_rule.materialized_through IS NULL
+               OR recurring_rule.materialized_through < LEAST(
+                 COALESCE(recurring_rule.ends_on, horizon.target_date),
+                 horizon.target_date
+               ) AS needs_extension
+           FROM recurring_availability_rules recurring_rule
+           CROSS JOIN horizon
+           WHERE recurring_rule.status = 'active'
+           ORDER BY recurring_rule.doctor_id, recurring_rule.id`,
+          [now],
+        )
+        return result.rows
+      } finally {
+        client.release()
+      }
+    },
+
     async create({ doctorId, startAt, endAt, fee }) {
       return withTransaction(databaseProvider, async client => {
         await lockDoctorForAvailability(client, doctorId)

@@ -14,6 +14,7 @@ import {
   createAvailabilityRepository,
 } from '../src/data-access/availability.repository.js'
 import { createAppointmentRepository } from '../src/data-access/appointment.repository.js'
+import { createRecurringAvailabilityExtenderService } from '../src/services/recurring-availability-extender.service.js'
 
 const { Pool } = pg
 const describeWithPostgres = process.env.DATABASE_URL ? describe : describe.skip
@@ -397,6 +398,182 @@ describeWithPostgres('recurring availability repository', () => {
     await expect(repository.listRecurringForDoctor(pendingDoctorId)).rejects.toMatchObject({
       code: 'DOCTOR_NOT_APPROVED',
     })
+  })
+
+  it('extends an indefinite rule to the next rolling Asia/Kolkata horizon', async () => {
+    const created = await create({
+      weekdays: [4],
+      startsOn: '2026-09-17',
+      endsOn: null,
+    })
+    const before = await occurrenceRows(created.rule.id)
+    const nextDay = new Date('2026-09-18T00:00:00.000Z')
+    const extender = createRecurringAvailabilityExtenderService({ repository, clock: () => nextDay })
+
+    await expect(extender.extend()).resolves.toEqual({ scanned: 1, extended: 1, skipped: 0, failed: 0 })
+
+    const after = await occurrenceRows(created.rule.id)
+    const rule = await query(
+      `SELECT to_char(materialized_through, 'YYYY-MM-DD') AS cursor
+       FROM recurring_availability_rules
+       WHERE id = $1`,
+      [created.rule.id],
+    )
+    expect(after).toHaveLength(before.length + 1)
+    expect(after.at(-1).date).toBe('2026-12-17')
+    expect(rule.rows[0].cursor).toBe('2026-12-17')
+  })
+
+  it('caps extension at ends_on and skips the fully evaluated rule afterward', async () => {
+    const created = await create({
+      weekdays: [4],
+      startsOn: '2026-09-17',
+      endsOn: '2026-12-17',
+    })
+    const firstClock = new Date('2026-09-18T00:00:00.000Z')
+    const first = createRecurringAvailabilityExtenderService({ repository, clock: () => firstClock })
+
+    await expect(first.extend()).resolves.toEqual({ scanned: 1, extended: 1, skipped: 0, failed: 0 })
+    const second = createRecurringAvailabilityExtenderService({
+      repository,
+      clock: () => new Date('2026-09-19T00:00:00.000Z'),
+    })
+    await expect(second.extend()).resolves.toEqual({ scanned: 1, extended: 0, skipped: 1, failed: 0 })
+
+    const occurrences = await occurrenceRows(created.rule.id)
+    expect(occurrences.at(-1).date).toBe('2026-12-17')
+    expect(occurrences.every(occurrence => occurrence.date <= '2026-12-17')).toBe(true)
+  })
+
+  it('skips an up-to-date rule without mutating it or duplicating rows', async () => {
+    const created = await create({ endsOn: null })
+    const before = await query(
+      `SELECT
+         rule.updated_at,
+         rule.materialized_through,
+         (SELECT COUNT(*)::int FROM availability_blocks WHERE recurring_rule_id = rule.id) AS blocks,
+         (SELECT COUNT(*)::int FROM slots slot
+          JOIN availability_blocks block ON block.id = slot.availability_block_id
+          WHERE block.recurring_rule_id = rule.id) AS slots
+       FROM recurring_availability_rules rule
+       WHERE rule.id = $1`,
+      [created.rule.id],
+    )
+    const extender = createRecurringAvailabilityExtenderService({ repository, clock: () => now })
+
+    await expect(extender.extend()).resolves.toEqual({ scanned: 1, extended: 0, skipped: 1, failed: 0 })
+    await expect(extender.extend()).resolves.toEqual({ scanned: 1, extended: 0, skipped: 1, failed: 0 })
+
+    const after = await query(
+      `SELECT
+         rule.updated_at,
+         rule.materialized_through,
+         (SELECT COUNT(*)::int FROM availability_blocks WHERE recurring_rule_id = rule.id) AS blocks,
+         (SELECT COUNT(*)::int FROM slots slot
+          JOIN availability_blocks block ON block.id = slot.availability_block_id
+          WHERE block.recurring_rule_id = rule.id) AS slots
+       FROM recurring_availability_rules rule
+       WHERE rule.id = $1`,
+      [created.rule.id],
+    )
+    expect(after.rows[0]).toEqual(before.rows[0])
+  })
+
+  it('never scans or extends a stopped rule', async () => {
+    const created = await create({ endsOn: null })
+    await repository.stopRecurring({ doctorId, ruleId: created.rule.id, now })
+    const extender = createRecurringAvailabilityExtenderService({
+      repository,
+      clock: () => new Date('2026-09-18T00:00:00.000Z'),
+    })
+
+    await expect(extender.extend()).resolves.toEqual({ scanned: 0, extended: 0, skipped: 0, failed: 0 })
+    const rule = await query('SELECT status FROM recurring_availability_rules WHERE id = $1', [created.rule.id])
+    expect(rule.rows[0].status).toBe('stopped')
+  })
+
+  it('allows concurrent extender instances without duplicate blocks or slots', async () => {
+    const created = await create({
+      weekdays: [4],
+      startsOn: '2026-09-17',
+      endsOn: null,
+    })
+    const nextDay = new Date('2026-09-18T00:00:00.000Z')
+    const first = createRecurringAvailabilityExtenderService({ repository, clock: () => nextDay })
+    const second = createRecurringAvailabilityExtenderService({ repository, clock: () => nextDay })
+
+    const summaries = await Promise.all([first.extend(), second.extend()])
+
+    expect(summaries.every(summary => summary.failed === 0)).toBe(true)
+    const occurrences = await occurrenceRows(created.rule.id)
+    const counts = await query(
+      `SELECT
+         to_char(rule.materialized_through, 'YYYY-MM-DD') AS cursor,
+         COUNT(DISTINCT block.id)::int AS blocks,
+         COUNT(slot.id)::int AS slots,
+         COUNT(DISTINCT (block.recurring_rule_id, block.start_at))::int AS unique_occurrences,
+         COUNT(DISTINCT (slot.availability_block_id, slot.start_at))::int AS unique_slots
+       FROM recurring_availability_rules rule
+       LEFT JOIN availability_blocks block ON block.recurring_rule_id = rule.id
+       LEFT JOIN slots slot ON slot.availability_block_id = block.id
+       WHERE rule.id = $1
+       GROUP BY rule.id`,
+      [created.rule.id],
+    )
+    expect(counts.rows[0]).toMatchObject({
+      cursor: '2026-12-17',
+      blocks: occurrences.length,
+      unique_occurrences: occurrences.length,
+      slots: occurrences.length * 6,
+      unique_slots: occurrences.length * 6,
+    })
+  })
+
+  it('keeps the Phase 4 stop invariant when an extender run is already materializing', async () => {
+    const created = await create({ endsOn: null })
+    const extensionGate = exclusiveLockGate()
+    const stopGate = exclusiveLockGate()
+    const controlledExtensionRepository = createAvailabilityRepository(extensionGate.provider)
+    const controlledStopRepository = createAvailabilityRepository(stopGate.provider)
+    const extensionTime = new Date('2026-10-01T00:00:00.000Z')
+    const extender = createRecurringAvailabilityExtenderService({
+      repository: controlledExtensionRepository,
+      clock: () => extensionTime,
+    })
+
+    const extending = extender.extend()
+    await extensionGate.acquired
+    const stopping = controlledStopRepository.stopRecurring({
+      doctorId,
+      ruleId: created.rule.id,
+      now: extensionTime,
+    })
+    await stopGate.attempted
+
+    stopGate.resume()
+    extensionGate.resume()
+    await expect(extending).resolves.toMatchObject({ failed: 0 })
+    await expect(stopping).resolves.toBeUndefined()
+
+    const state = await query(
+      `SELECT
+         rule.status,
+         COUNT(block.id) FILTER (WHERE block.start_at > $2)::int AS future_blocks,
+         COUNT(block.id) FILTER (
+           WHERE EXISTS (
+             SELECT 1 FROM slots slot
+             WHERE slot.availability_block_id = block.id
+               AND slot.is_active
+               AND slot.start_at > $2
+           )
+         )::int AS bookable_blocks
+       FROM recurring_availability_rules rule
+       LEFT JOIN availability_blocks block ON block.recurring_rule_id = rule.id
+       WHERE rule.id = $1
+       GROUP BY rule.id`,
+      [created.rule.id, extensionTime],
+    )
+    expect(state.rows[0]).toEqual({ status: 'stopped', future_blocks: 0, bookable_blocks: 0 })
   })
 
   it('stops a rule and deletes fully future occurrences with no appointment history', async () => {
