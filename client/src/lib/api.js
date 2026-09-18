@@ -100,6 +100,21 @@ export function deleteDoctorAvailability(blockId) {
   return requestJson(`/api/doctors/me/availability/${blockId}`, { method: 'DELETE' })
 }
 
+export function listDoctorRecurringAvailability(signal) {
+  return requestJson('/api/doctors/me/availability/rules', { signal })
+}
+
+export function createDoctorRecurringAvailability(rule) {
+  return requestJson('/api/doctors/me/availability/rules', {
+    method: 'POST',
+    body: JSON.stringify(rule),
+  })
+}
+
+export function stopDoctorRecurringAvailability(ruleId) {
+  return requestJson(`/api/doctors/me/availability/rules/${ruleId}`, { method: 'DELETE' })
+}
+
 export function getAppointment(appointmentId, signal) {
   return requestJson(`/api/appointments/${appointmentId}`, { signal })
 }

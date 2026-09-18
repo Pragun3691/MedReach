@@ -11,6 +11,8 @@ import { DoctorAvailabilityPage } from './DoctorAvailabilityPage.jsx'
 
 const api = vi.hoisted(() => ({
   listDoctorAvailability: vi.fn(), createDoctorAvailability: vi.fn(), deleteDoctorAvailability: vi.fn(),
+  listDoctorRecurringAvailability: vi.fn(), createDoctorRecurringAvailability: vi.fn(),
+  stopDoctorRecurringAvailability: vi.fn(),
 }))
 vi.mock('../lib/api.js', () => api)
 vi.mock('../components/PublicHeader.jsx', () => ({ PublicHeader: () => null }))
@@ -24,6 +26,7 @@ function block(overrides = {}) {
     startAt: '2030-09-21T03:30:00.000Z',
     endAt: '2030-09-21T04:30:00.000Z',
     effectiveFee: 600,
+    recurringRuleId: null,
     isProtected: false,
     canDelete: true,
     slots: [
@@ -32,6 +35,30 @@ function block(overrides = {}) {
     ],
     ...overrides,
   }
+}
+
+function datedBlock(date, overrides = {}) {
+  const id = overrides.id ?? Number(date.replaceAll('-', ''))
+  const startTime = overrides.startTime ?? '09:00'
+  const endTime = overrides.endTime ?? '10:00'
+  const startAt = new Date(`${date}T${startTime}:00+05:30`)
+  const endAt = new Date(`${date}T${endTime}:00+05:30`)
+  const booked = overrides.booked ?? false
+  return block({
+    id,
+    startAt: startAt.toISOString(),
+    endAt: endAt.toISOString(),
+    recurringRuleId: overrides.recurringRuleId ?? null,
+    slots: [0, 1].map(index => ({
+      id: id * 10 + index,
+      startAt: new Date(startAt.getTime() + index * 30 * 60 * 1000).toISOString(),
+      endAt: new Date(startAt.getTime() + (index + 1) * 30 * 60 * 1000).toISOString(),
+      isActive: !(booked && index === 1),
+      isBooked: booked && index === 1,
+      hasAppointmentHistory: booked && index === 1,
+    })),
+    ...overrides,
+  })
 }
 
 function createdBlock(fee = null) {
@@ -49,6 +76,22 @@ function createdBlock(fee = null) {
       hasAppointmentHistory: false,
     })),
   })
+}
+
+function recurringRule(overrides = {}) {
+  return {
+    id: 41,
+    weekdays: [1, 3, 5],
+    startTime: '09:00',
+    endTime: '12:00',
+    startsOn: '2026-09-21',
+    endsOn: '2026-10-31',
+    effectiveFee: 650,
+    status: 'active',
+    materializedThrough: '2026-10-31',
+    materializedOccurrenceCount: 18,
+    ...overrides,
+  }
 }
 
 async function settle() {
@@ -89,8 +132,18 @@ async function input(target, value) {
 }
 
 async function openAddDialog(host) {
-  await click(button(host, '+ Add availability') ?? button(host, 'Add availability'))
+  await click(button(host, '+ Add one-off time'))
   return host.querySelector('[role="dialog"]')
+}
+
+async function openWeeklyDialog(host) {
+  await click(button(host, '+ Add weekly schedule'))
+  return host.querySelector('[role="dialog"]')
+}
+
+async function chooseDate(dialog, triggerLabel, dateLabel) {
+  await click(dialog.querySelector(`button[aria-label^="${triggerLabel},"]`))
+  await click(dialog.querySelector(`button[aria-label="Choose ${dateLabel}"]`))
 }
 
 async function chooseSeptember24(dialog) {
@@ -117,6 +170,9 @@ beforeEach(() => {
   api.listDoctorAvailability.mockResolvedValue({ items: [] })
   api.createDoctorAvailability.mockResolvedValue({ availability: {} })
   api.deleteDoctorAvailability.mockResolvedValue(null)
+  api.listDoctorRecurringAvailability.mockResolvedValue({ items: [] })
+  api.createDoctorRecurringAvailability.mockResolvedValue({ rule: {} })
+  api.stopDoctorRecurringAvailability.mockResolvedValue(null)
 })
 
 afterEach(() => {
@@ -125,23 +181,157 @@ afterEach(() => {
 })
 
 describe('Doctor availability', () => {
-  it('loads availability and renders slots and effective fee', async () => {
+  it('summarises availability and keeps slot details collapsed until requested', async () => {
     api.listDoctorAvailability.mockResolvedValue({ items: [block()] })
     const { host, root } = await renderPage()
     expect(api.listDoctorAvailability).toHaveBeenCalledWith(expect.any(AbortSignal))
     expect(host.textContent).toContain('Saturday, 21 September')
-    expect(host.textContent).toContain('2 × 30-minute slots')
-    expect(host.textContent).toContain('₹600')
-    expect(host.textContent).toContain('Available')
-    expect(host.textContent).toContain('Booked')
+    expect(host.textContent).toContain('2 slots · 1 available · 1 booked')
+    expect(host.textContent).toContain('9:00 AM – 10:00 AM')
+    expect(host.textContent).toContain('₹600 per consultation')
+    expect(host.textContent).toContain('One-off')
+    expect(host.querySelector('.availability-slots')).toBeNull()
+    expect(host.querySelector('.availability-block__disclosure').getAttribute('aria-expanded')).toBe('false')
+    expect(host.querySelector('a[href="/doctor/appointments"]')).toBeTruthy()
+    await click(host.querySelector('.availability-block__disclosure'))
+    expect(host.querySelector('.availability-slots').textContent).toContain('Available')
+    expect(host.querySelector('.availability-slots').textContent).toContain('Booked')
+    expect(host.querySelector('.availability-slots').textContent).toContain('9:30 AM')
+    expect(host.textContent).not.toMatch(/\b(?:am|pm)\b/)
+    expect(host.querySelector('.availability-block__disclosure').getAttribute('aria-expanded')).toBe('true')
     await act(async () => root.unmount())
   })
 
-  it('renders a spacious empty schedule with a secondary add action', async () => {
+  it('renders the permanent calendar workspace and the single schedule settings panel', async () => {
     const { host, root } = await renderPage()
-    expect(host.textContent).toContain('No upcoming availability')
-    expect(host.textContent).toContain('Add time so patients can book a consultation.')
-    expect(button(host, 'Add availability')).toBeTruthy()
+    const regular = host.querySelector('#regular-schedule-heading').closest('section')
+    const calendar = host.querySelector('#availability-calendar-heading').closest('section')
+    expect(regular.classList.contains('availability-section--regular')).toBe(true)
+    expect(calendar.classList.contains('availability-section--upcoming')).toBe(true)
+    expect(calendar.querySelector('.availability-browser')).toBeTruthy()
+    expect(host.textContent).toContain('Manage when patients can book consultations.')
+    expect(host.textContent).not.toContain('Upcoming schedule')
+    expect(host.textContent).not.toContain('Browse schedule')
+    expect(host.textContent).not.toContain('Close schedule browser')
+    expect(regular.querySelector('.availability-management-actions')).toBeTruthy()
+    expect([...host.querySelectorAll('button')].filter(item => item.textContent.trim() === '+ Add weekly schedule')).toHaveLength(1)
+    expect([...host.querySelectorAll('button')].filter(item => item.textContent.trim() === '+ Add one-off time')).toHaveLength(1)
+    expect(host.querySelectorAll('.availability-section')).toHaveLength(2)
+    expect(host.textContent).toContain('No bookable availability yet.')
+    expect(host.textContent).toContain('Set a regular schedule or add one-off time to start accepting bookings.')
+    await act(async () => root.unmount())
+  })
+
+  it('defaults to the earliest future availability without rendering a duplicate date feed', async () => {
+    api.listDoctorAvailability.mockResolvedValue({ items: [
+      datedBlock('2026-09-18', { id: 18 }),
+      datedBlock('2026-09-19', { id: 19, recurringRuleId: 41 }),
+      datedBlock('2026-12-03', { id: 1203, recurringRuleId: 41 }),
+    ] })
+    const { host, root } = await renderPage()
+
+    const selected = host.querySelector('button[aria-label^="View Friday, 18 September 2026"]')
+    expect(selected.getAttribute('aria-selected')).toBe('true')
+    expect(host.querySelector('#availability-browse-date-2026-09-18')).toBeTruthy()
+    expect(host.querySelector('#availability-browse-date-2026-09-19')).toBeNull()
+    expect(host.textContent).not.toContain('Thursday, 3 December')
+    expect(host.querySelector('.availability-browser')).toBeTruthy()
+    expect(host.querySelectorAll('.availability-date--selected')).toHaveLength(1)
+    await act(async () => root.unmount())
+  })
+
+  it('navigates useful months, selects unavailable dates, and resets focused slot details', async () => {
+    api.listDoctorAvailability.mockResolvedValue({ items: [
+      datedBlock('2026-09-18', { id: 18 }),
+      datedBlock('2026-09-19', { id: 19, recurringRuleId: 41 }),
+      datedBlock('2026-10-03', { id: 1003, recurringRuleId: 41, booked: true }),
+      datedBlock('2026-10-03', { id: 1004, startTime: '11:00', endTime: '12:00' }),
+      datedBlock('2026-12-03', { id: 1203, recurringRuleId: 41 }),
+    ] })
+    const { host, root } = await renderPage()
+
+    const browser = host.querySelector('.availability-browser')
+    expect(browser.querySelector('.availability-browser__month-header h2').textContent).toBe('September 2026')
+    const availableDate = browser.querySelector('button[aria-label^="View Friday, 18 September 2026"]')
+    const unavailableDate = browser.querySelector('button[aria-label^="Select Sunday, 20 September 2026"]')
+    expect(availableDate.dataset.available).toBe('true')
+    expect(availableDate.querySelector('.availability-browser__date-number').textContent).toBe('18')
+    expect(availableDate.querySelector('i')).toBeTruthy()
+    expect(unavailableDate.dataset.available).toBeUndefined()
+    expect(unavailableDate.disabled).toBe(false)
+
+    await click(browser.querySelector('.availability-block__disclosure'))
+    expect(browser.querySelector('.availability-slots')).toBeTruthy()
+    await click(browser.querySelector('button[aria-label^="View Saturday, 19 September 2026"]'))
+    expect(browser.querySelector('.availability-slots')).toBeNull()
+    await click(unavailableDate)
+    expect(browser.textContent).toContain('No bookable time on this date.')
+    expect(unavailableDate.getAttribute('aria-selected')).toBe('true')
+
+    await click(button(browser, 'Today'))
+    expect(browser.querySelector('button[aria-current="date"]').getAttribute('aria-selected')).toBe('true')
+    expect(browser.textContent).toContain('No bookable time on this date.')
+
+    await click(browser.querySelector('button[aria-label="Next month"]'))
+    expect(browser.querySelector('.availability-browser__month-header h2').textContent).toBe('October 2026')
+    expect(browser.querySelector('button[aria-label="Previous month"]').classList.contains('availability-browser__month-nav')).toBe(true)
+    const selectedDate = browser.querySelector('button[aria-label^="View Saturday, 3 October 2026"]')
+    const detail = browser.querySelector('.availability-date--selected')
+    expect(selectedDate.getAttribute('aria-selected')).toBe('true')
+    expect(detail.querySelectorAll('.availability-block')).toHaveLength(2)
+    expect(detail.textContent).toContain('2 slots · 1 available · 1 booked')
+    expect(detail.textContent).toContain('From regular schedule')
+    expect(detail.textContent).toContain('One-off')
+    expect(detail.querySelectorAll('.availability-block__remove')).toHaveLength(1)
+    expect(detail.querySelector('.availability-slots')).toBeNull()
+    await click(detail.querySelector('.availability-block__disclosure'))
+    expect(detail.querySelector('.availability-slots').textContent).toContain('Booked')
+
+    await click(browser.querySelector('button[aria-label="Next month"]'))
+    expect(browser.querySelector('.availability-browser__month-header h2').textContent).toBe('November 2026')
+    expect(browser.textContent).toContain('No bookable time this month.')
+    expect(browser.querySelector('.availability-date--selected')).toBeNull()
+    expect(browser.textContent).toContain('Select a future date to see availability.')
+    await click(browser.querySelector('button[aria-label="Next month"]'))
+    expect(browser.querySelector('.availability-browser__month-header h2').textContent).toBe('December 2026')
+    expect(browser.querySelector('button[aria-label="Next month"]').disabled).toBe(true)
+    expect(browser.querySelector('button[aria-label^="View Thursday, 3 December 2026"]').getAttribute('aria-selected')).toBe('true')
+    expect(browser.querySelector('.availability-date--selected').textContent).toContain('From regular schedule')
+    await act(async () => root.unmount())
+  })
+
+  it('keeps an empty calendar on the current month with useful navigation bounds', async () => {
+    const { host, root } = await renderPage()
+    const browser = host.querySelector('.availability-browser')
+    expect(browser.querySelector('.availability-browser__month-header h2').textContent).toBe('September 2026')
+    expect(browser.querySelector('button[aria-label="Previous month"]').disabled).toBe(true)
+    expect(browser.querySelector('button[aria-label="Next month"]').disabled).toBe(true)
+    expect(browser.querySelector('button[aria-selected="true"]')).toBeNull()
+    expect(browser.textContent).toContain('No bookable time this month.')
+    expect(browser.textContent).toContain('No bookable availability yet.')
+    expect(browser.textContent).toContain('Set a regular schedule or add one-off time to start accepting bookings.')
+    await act(async () => root.unmount())
+  })
+
+  it('uses recurringRuleId as the sole source signal and only lets removable one-off blocks be deleted', async () => {
+    api.listDoctorAvailability.mockResolvedValue({ items: [
+      block(),
+      block({
+        id: 9,
+        recurringRuleId: 41,
+        startAt: '2030-09-21T05:30:00.000Z',
+        endAt: '2030-09-21T06:30:00.000Z',
+        canDelete: true,
+      }),
+    ] })
+    const { host, root } = await renderPage()
+    const blocks = host.querySelectorAll('.availability-block')
+
+    expect(blocks[0].textContent).toContain('One-off')
+    expect(button(blocks[0], 'Remove block')).toBeTruthy()
+    expect(blocks[1].textContent).toContain('From regular schedule')
+    expect(button(blocks[1], 'Remove block')).toBeUndefined()
+    expect(host.querySelectorAll('.availability-block__remove')).toHaveLength(1)
     await act(async () => root.unmount())
   })
 
@@ -157,6 +347,8 @@ describe('Doctor availability', () => {
   it('selects a date from the custom calendar and closes the popover', async () => {
     const { host, root } = await renderPage()
     const dialog = await openAddDialog(host)
+    expect(dialog.textContent).toContain('One-off availability')
+    expect(dialog.textContent).not.toContain('New one-off time')
     expect(dialog.querySelector('input[type="date"]')).toBeNull()
     await click(button(dialog, 'Choose a date'))
     expect(dialog.textContent).toContain('September 2026')
@@ -252,8 +444,8 @@ describe('Doctor availability', () => {
     expect(api.createDoctorAvailability).toHaveBeenCalledWith({ date: '2026-09-24', startTime: '10:30', endTime: '12:30', fee: 725 })
     expect(api.listDoctorAvailability).toHaveBeenCalledTimes(2)
     expect(host.querySelector('[role="dialog"]')).toBeNull()
-    expect(host.textContent).toContain('Availability added.')
-    expect(host.textContent).toContain('4 × 30-minute slots')
+    expect(host.textContent).toContain('One-off availability added.')
+    expect(host.textContent).toContain('4 slots · 4 available · 0 booked')
     expect(host.textContent).toContain('₹725')
     await act(async () => root.unmount())
   })
@@ -308,11 +500,144 @@ describe('Doctor availability', () => {
     await act(async () => root.unmount())
   })
 
+  it('loads recurring rules and renders active and stopped schedule details safely', async () => {
+    api.listDoctorRecurringAvailability.mockResolvedValue({ items: [
+      recurringRule(),
+      recurringRule({ id: 42, weekdays: [2, 4], startsOn: '2026-09-26', endsOn: null, effectiveFee: null }),
+      recurringRule({ id: 43, weekdays: [6], status: 'stopped', materializedOccurrenceCount: 0 }),
+    ] })
+    const { host, root } = await renderPage()
+
+    expect(api.listDoctorRecurringAvailability).toHaveBeenCalledWith(expect.any(AbortSignal))
+    expect(host.textContent).toContain('Mon · Wed · Fri')
+    expect(host.textContent).toContain('9:00 AM – 12:00 PM')
+    expect(host.textContent).toContain('21 Sep 2026 – 31 Oct 2026')
+    expect(host.textContent).toContain('₹650 per consultation')
+    const previous = host.querySelector('.availability-previous')
+    const previousToggle = previous.querySelector('button[aria-expanded]')
+    expect(previousToggle.getAttribute('aria-expanded')).toBe('false')
+    expect(previousToggle.textContent).toContain('Previous schedules (1)')
+    expect(host.textContent).toContain('Tue · Thu')
+    expect(host.textContent).toContain('Starting 26 Sep 2026 · No end date')
+    expect(host.textContent).toContain('Fee not specified')
+    expect(host.textContent).not.toContain('Stopped')
+    await click(previousToggle)
+    expect(host.textContent).toContain('Stopped')
+    expect(button(previous, 'Stop schedule')).toBeUndefined()
+    expect(previousToggle.getAttribute('aria-expanded')).toBe('true')
+    expect(host.textContent).not.toContain('Date unavailable')
+    expect(host.textContent).not.toContain('undefined')
+    expect(host.textContent).not.toContain('NaN')
+    await act(async () => root.unmount())
+  })
+
+  it('creates a no-end weekly schedule with ISO weekdays, half-hour values and a live preview', async () => {
+    api.listDoctorRecurringAvailability
+      .mockResolvedValueOnce({ items: [] })
+      .mockResolvedValueOnce({ items: [recurringRule({ endsOn: null, effectiveFee: null })] })
+    const { host, root } = await renderPage()
+    const dialog = await openWeeklyDialog(host)
+    expect(dialog.textContent).toContain('Regular schedule')
+    expect(dialog.textContent).not.toContain('New regular schedule')
+
+    await click(button(dialog, 'Add weekly schedule'))
+    expect(dialog.textContent).toContain('Choose at least one day of the week.')
+    await click(dialog.querySelector('button[aria-label="Monday"]'))
+    await click(dialog.querySelector('button[aria-label="Wednesday"]'))
+    await click(dialog.querySelector('button[aria-label="Friday"]'))
+
+    await click(dialog.querySelector('button[aria-label^="Start time,"]'))
+    const startValues = [...dialog.querySelectorAll('[aria-label="Start time options"] [role="option"]')].map(option => option.value)
+    expect(startValues.every(value => value.endsWith(':00') || value.endsWith(':30'))).toBe(true)
+    await click(dialog.querySelector('[aria-label="Start time options"] [value="09:00"]'))
+    await chooseTime(dialog, 'End time', '12:00')
+    await chooseDate(dialog, 'Starts on', 'Monday, 21 September 2026')
+
+    const preview = dialog.querySelector('.availability-dialog__preview--weekly')
+    expect(preview.textContent).toContain('Every Monday, Wednesday and Friday')
+    expect(preview.textContent).toContain('9:00 AM – 12:00 PM')
+    expect(preview.textContent).toContain('Starting 21 Sep 2026')
+    expect(preview.textContent).toContain('Continues weekly')
+    expect(preview.textContent).toContain('6 × 30-minute slots each day')
+
+    await click(button(dialog, 'Add weekly schedule'))
+    expect(api.createDoctorRecurringAvailability).toHaveBeenCalledWith({
+      weekdays: [1, 3, 5], startTime: '09:00', endTime: '12:00', startsOn: '2026-09-21',
+    })
+    expect(api.listDoctorRecurringAvailability).toHaveBeenCalledTimes(2)
+    expect(api.listDoctorAvailability).toHaveBeenCalledTimes(2)
+    expect(host.textContent).toContain('Weekly schedule added.')
+    await act(async () => root.unmount())
+  })
+
+  it('creates a bounded weekly schedule and prevents an end date before its start', async () => {
+    const { host, root } = await renderPage()
+    const dialog = await openWeeklyDialog(host)
+    await click(dialog.querySelector('button[aria-label="Thursday"]'))
+    await chooseTime(dialog, 'Start time', '16:00')
+    await chooseTime(dialog, 'End time', '19:00')
+    await chooseDate(dialog, 'Starts on', 'Monday, 21 September 2026')
+    await click([...dialog.querySelectorAll('.availability-end-choice label')].find(label => label.textContent.includes('End on date')))
+    await click(dialog.querySelector('button[aria-label^="Ends on,"]'))
+    expect(dialog.querySelector('button[aria-label="Choose Sunday, 20 September 2026"]').disabled).toBe(true)
+    await click(dialog.querySelector('button[aria-label="Next month"]'))
+    await click(dialog.querySelector('button[aria-label="Choose Saturday, 31 October 2026"]'))
+    await input(dialog.querySelector('input[name="weeklyFee"]'), '700')
+
+    const preview = dialog.querySelector('.availability-dialog__preview--weekly')
+    expect(preview.textContent).toContain('Every Thursday')
+    expect(preview.textContent).toContain('Until 31 Oct 2026')
+    expect(preview.textContent).toContain('6 × 30-minute slots each day')
+    await click(button(dialog, 'Add weekly schedule'))
+    expect(api.createDoctorRecurringAvailability).toHaveBeenCalledWith({
+      weekdays: [4], startTime: '16:00', endTime: '19:00', startsOn: '2026-09-21', endsOn: '2026-10-31', fee: 700,
+    })
+    await act(async () => root.unmount())
+  })
+
+  it('shows the recurring overlap message without leaking the backend error', async () => {
+    api.createDoctorRecurringAvailability.mockRejectedValue(Object.assign(new Error('database detail'), { code: 'AVAILABILITY_OVERLAP' }))
+    const { host, root } = await renderPage()
+    const dialog = await openWeeklyDialog(host)
+    await click(dialog.querySelector('button[aria-label="Monday"]'))
+    await chooseTime(dialog, 'Start time', '09:00')
+    await chooseTime(dialog, 'End time', '10:00')
+    await chooseDate(dialog, 'Starts on', 'Monday, 21 September 2026')
+    await click(button(dialog, 'Add weekly schedule'))
+
+    expect(dialog.textContent).toContain('This schedule overlaps availability you already have.')
+    expect(dialog.textContent).not.toContain('database detail')
+    await act(async () => root.unmount())
+  })
+
+  it('confirms and stops a weekly schedule while preserving appointment expectations', async () => {
+    api.listDoctorRecurringAvailability
+      .mockResolvedValueOnce({ items: [recurringRule()] })
+      .mockResolvedValueOnce({ items: [recurringRule({ status: 'stopped' })] })
+    const { host, root } = await renderPage()
+    await click(button(host, 'Stop schedule'))
+    const dialog = host.querySelector('[role="dialog"]')
+    expect(dialog.textContent).toContain('Stop this weekly schedule?')
+    expect(dialog.textContent).toContain('Existing patient appointments will not be cancelled.')
+    await click(button(dialog, 'Stop schedule'))
+
+    expect(api.stopDoctorRecurringAvailability).toHaveBeenCalledWith(41)
+    expect(api.listDoctorRecurringAvailability).toHaveBeenCalledTimes(2)
+    expect(api.listDoctorAvailability).toHaveBeenCalledTimes(2)
+    expect(host.textContent).toContain('Weekly schedule stopped.')
+    await click(host.querySelector('.availability-previous > button'))
+    expect(host.textContent).toContain('Stopped')
+    await act(async () => root.unmount())
+  })
+
   it('confirms and deletes an allowed block, then refreshes', async () => {
     api.listDoctorAvailability.mockResolvedValueOnce({ items: [block()] }).mockResolvedValueOnce({ items: [] })
     const { host, root } = await renderPage()
-    await click(button(host, 'Remove availability'))
-    await click(button(host.querySelector('[role="dialog"]'), 'Remove availability'))
+    await click(button(host, 'Remove block'))
+    const dialog = host.querySelector('[role="dialog"]')
+    expect(dialog.textContent).toContain('Remove this availability?')
+    expect(dialog.textContent).toContain('Patients will no longer be able to book these open times.')
+    await click(button(dialog, 'Remove availability'))
     expect(api.deleteDoctorAvailability).toHaveBeenCalledWith(8)
     expect(api.listDoctorAvailability).toHaveBeenCalledTimes(2)
     expect(host.textContent).toContain('Availability removed.')
@@ -322,8 +647,8 @@ describe('Doctor availability', () => {
   it('does not offer deletion for a protected block', async () => {
     api.listDoctorAvailability.mockResolvedValue({ items: [block({ isProtected: true, canDelete: false })] })
     const { host, root } = await renderPage()
-    expect(host.textContent).toContain('This availability has appointment history and can’t be removed.')
-    expect(button(host, 'Remove availability')).toBeUndefined()
+    expect(host.textContent).toContain('This one-off time has appointment history and can’t be removed.')
+    expect(button(host, 'Remove block')).toBeUndefined()
     await act(async () => root.unmount())
   })
 
@@ -331,9 +656,9 @@ describe('Doctor availability', () => {
     api.listDoctorAvailability.mockResolvedValueOnce({ items: [block()] }).mockResolvedValueOnce({ items: [block({ isProtected: true, canDelete: false })] })
     api.deleteDoctorAvailability.mockRejectedValue(Object.assign(new Error('technical'), { code: 'AVAILABILITY_BLOCK_PROTECTED' }))
     const { host, root } = await renderPage()
-    await click(button(host, 'Remove availability'))
+    await click(button(host, 'Remove block'))
     await click(button(host.querySelector('[role="dialog"]'), 'Remove availability'))
-    expect(host.textContent).toContain('This availability has appointment history and can’t be removed.')
+    expect(host.textContent).toContain('This one-off time has appointment history and can’t be removed.')
     expect(host.textContent).not.toContain('technical')
     expect(api.listDoctorAvailability).toHaveBeenCalledTimes(2)
     await act(async () => root.unmount())

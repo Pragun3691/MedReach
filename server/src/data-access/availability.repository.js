@@ -71,8 +71,8 @@ const indiaDateTimeFormatter = new Intl.DateTimeFormat('en-GB', {
 })
 
 function calendarDate(value) {
-  if (typeof value === 'string') return value.slice(0, 10)
-  return indiaDate(value)
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+  return indiaDate(new Date(value))
 }
 
 function clockTime(value) {
@@ -324,6 +324,7 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
            block.id AS block_id,
            block.start_at AS block_start_at,
            block.end_at AS block_end_at,
+           block.recurring_rule_id,
            COALESCE(block.effective_fee, profile.default_fee) AS effective_fee,
            slot.id AS slot_id,
            slot.start_at AS slot_start_at,
@@ -412,7 +413,16 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
         throw new AvailabilityDataError('DOCTOR_NOT_APPROVED')
       }
 
-      return result.rows.filter(row => row.rule_id !== null)
+      return result.rows
+        .filter(row => row.rule_id !== null)
+        .map(row => ({
+          ...recurringRuleFromRow({
+            ...row,
+            id: row.rule_id,
+            doctor_id: doctorId,
+          }),
+          materializedOccurrenceCount: Number(row.materialized_occurrence_count),
+        }))
     },
 
     async listRecurringRulesForExtension(now = new Date()) {

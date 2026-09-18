@@ -396,6 +396,32 @@ describe('recurring availability list API', () => {
     ])
   })
 
+  it('serializes PostgreSQL date objects as stable calendar-date strings', async () => {
+    context.rules.push({
+      id: 21,
+      doctorId: 10,
+      weekdays: [1, 5],
+      startTime: '09:00',
+      endTime: '12:00',
+      startsOn: new Date('2026-09-27T18:30:00.000Z'),
+      endsOn: new Date('2026-10-30T18:30:00.000Z'),
+      fee: 650,
+      status: 'active',
+      materializedThrough: new Date('2026-10-30T18:30:00.000Z'),
+      materializedOccurrenceCount: 10,
+      createdAt: '2026-09-18T00:00:00.000Z',
+    })
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.get('/api/doctors/me/availability/rules')
+
+    expect(response.status).toBe(200)
+    expect(response.body.items[0]).toMatchObject({
+      startsOn: '2026-09-28',
+      endsOn: '2026-10-31',
+      materializedThrough: '2026-10-31',
+    })
+  })
+
   it.each(['pending@example.test', 'rejected@example.test'])('rejects list access for a non-approved Doctor (%s)', async email => {
     const doctor = await login(context.app, email)
     const response = await doctor.get('/api/doctors/me/availability/rules')

@@ -29,13 +29,14 @@ function createTestContext() {
   let nextBlockId = 1
   let nextSlotId = 100
 
-  function addBlock({ doctorId, startAt, endAt, effectiveFee = null, slotStarts = [] }) {
+  function addBlock({ doctorId, startAt, endAt, effectiveFee = null, recurringRuleId = null, slotStarts = [] }) {
     const block = {
       id: nextBlockId++,
       doctorId,
       startAt: new Date(startAt),
       endAt: new Date(endAt),
       effectiveFee,
+      recurringRuleId,
     }
     blocks.push(block)
 
@@ -79,6 +80,7 @@ function createTestContext() {
             block_id: block.id,
             block_start_at: block.startAt,
             block_end_at: block.endAt,
+            recurring_rule_id: block.recurringRuleId,
             effective_fee: block.effectiveFee ?? defaultFees.get(doctorId) ?? null,
             slot_id: slot?.id ?? null,
             slot_start_at: slot?.startAt ?? null,
@@ -458,6 +460,33 @@ describe('Doctor own availability API', () => {
     expect(response.status).toBe(200)
     expect(response.body.items.map(item => item.id)).toEqual([own.block.id])
     expect(response.body.items.flatMap(item => item.slots).map(item => item.id)).not.toContain(other.slots[0].id)
+  })
+
+  it('exposes only the owned block source identifier for one-off and recurring availability', async () => {
+    context.addBlock({
+      doctorId: 10,
+      startAt: '2026-09-20T03:30:00.000Z',
+      endAt: '2026-09-20T04:00:00.000Z',
+      recurringRuleId: null,
+    })
+    context.addBlock({
+      doctorId: 10,
+      startAt: '2026-09-21T03:30:00.000Z',
+      endAt: '2026-09-21T04:00:00.000Z',
+      recurringRuleId: 73,
+    })
+    context.addBlock({
+      doctorId: 13,
+      startAt: '2026-09-22T03:30:00.000Z',
+      endAt: '2026-09-22T04:00:00.000Z',
+      recurringRuleId: 99,
+    })
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.get('/api/doctors/me/availability')
+
+    expect(response.status).toBe(200)
+    expect(response.body.items.map(item => item.recurringRuleId)).toEqual([null, 73])
+    expect(JSON.stringify(response.body)).not.toContain('99')
   })
 
   it('sorts blocks and their slots by start time', async () => {

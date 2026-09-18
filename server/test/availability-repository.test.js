@@ -248,8 +248,44 @@ describe('availability repository transactions', () => {
     expect(sql).toContain('ORDER BY block.start_at ASC')
     expect(sql).toContain('slot.start_at ASC')
     expect(sql).toContain('FROM appointments appointment_history')
+    expect(sql).toContain('block.recurring_rule_id')
     expect(sql).not.toContain('appointment_history.status')
     expect(values).toEqual([10, currentTime])
+  })
+
+  it('normalizes recurring-rule PostgreSQL dates at the repository boundary', async () => {
+    const client = {
+      query: vi.fn().mockResolvedValue({
+        rows: [{
+          is_enabled: true,
+          verification_status: 'approved',
+          rule_id: 41,
+          weekdays: [1, 5],
+          start_time: '09:00:00',
+          end_time: '12:00:00',
+          starts_on: new Date('2026-09-27T18:30:00.000Z'),
+          ends_on: new Date('2026-10-30T18:30:00.000Z'),
+          effective_fee: '650',
+          status: 'active',
+          materialized_through: new Date('2026-10-30T18:30:00.000Z'),
+          materialized_occurrence_count: 10,
+          created_at: new Date('2026-09-18T00:00:00.000Z'),
+          updated_at: new Date('2026-09-18T00:00:00.000Z'),
+        }],
+      }),
+      release: vi.fn(),
+    }
+    const repository = createAvailabilityRepository(() => ({ connect: async () => client }))
+
+    const rules = await repository.listRecurringForDoctor(10)
+
+    expect(rules[0]).toMatchObject({
+      startsOn: '2026-09-28',
+      endsOn: '2026-10-31',
+      materializedThrough: '2026-10-31',
+      materializedOccurrenceCount: 10,
+    })
+    expect(client.release).toHaveBeenCalledOnce()
   })
 
   it('rolls back the block when slot creation fails', async () => {

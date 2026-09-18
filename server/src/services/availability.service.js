@@ -12,6 +12,22 @@ function optionalNumber(value) {
   return value === null || value === undefined ? null : Number(value)
 }
 
+const indiaCalendarDateFormatter = new Intl.DateTimeFormat('en-CA', {
+  day: '2-digit',
+  month: '2-digit',
+  timeZone: 'Asia/Kolkata',
+  year: 'numeric',
+})
+
+function calendarDateString(value) {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+  const date = new Date(value)
+  const parts = Object.fromEntries(
+    indiaCalendarDateFormatter.formatToParts(date).map(part => [part.type, part.value]),
+  )
+  return `${parts.year}-${parts.month}-${parts.day}`
+}
+
 function translateDataError(error) {
   if (!(error instanceof AvailabilityDataError)) throw error
 
@@ -57,15 +73,15 @@ export function createAvailabilityService(repository = availabilityRepository, c
       weekdays: (rule.weekdays ?? []).map(Number),
       startTime: rule.startTime ?? String(rule.start_time).slice(0, 5),
       endTime: rule.endTime ?? String(rule.end_time).slice(0, 5),
-      startsOn: rule.startsOn ?? String(rule.starts_on).slice(0, 10),
+      startsOn: calendarDateString(rule.startsOn ?? rule.starts_on),
       endsOn: (rule.endsOn ?? rule.ends_on) == null
         ? null
-        : String(rule.endsOn ?? rule.ends_on).slice(0, 10),
+        : calendarDateString(rule.endsOn ?? rule.ends_on),
       effectiveFee: optionalNumber(rule.fee ?? rule.effective_fee),
       status: rule.status,
       materializedThrough: (rule.materializedThrough ?? rule.materialized_through) == null
         ? null
-        : String(rule.materializedThrough ?? rule.materialized_through).slice(0, 10),
+        : calendarDateString(rule.materializedThrough ?? rule.materialized_through),
       materializedOccurrenceCount: Number(materializedOccurrenceCount),
     }
   }
@@ -91,6 +107,9 @@ export function createAvailabilityService(repository = availabilityRepository, c
             id: blockId,
             startAt: row.block_start_at,
             endAt: row.block_end_at,
+            recurringRuleId: row.recurring_rule_id === null || row.recurring_rule_id === undefined
+              ? null
+              : Number(row.recurring_rule_id),
             effectiveFee: optionalNumber(row.effective_fee),
             slots: [],
             isProtected: false,
@@ -160,7 +179,10 @@ export function createAvailabilityService(repository = availabilityRepository, c
       try {
         const rows = await repository.listRecurringForDoctor(doctorId)
         return {
-          items: rows.map(row => recurringRule(row, row.materialized_occurrence_count)),
+          items: rows.map(row => recurringRule(
+            row,
+            row.materializedOccurrenceCount ?? row.materialized_occurrence_count,
+          )),
         }
       } catch (error) {
         translateDataError(error)
