@@ -381,13 +381,13 @@ describeWithPostgres('recurring availability repository', () => {
 
     const rows = await repository.listRecurringForDoctor(doctorId)
 
-    expect(rows.map(row => Number(row.rule_id))).toEqual([
+    expect(rows.map(row => row.id)).toEqual([
       newestActive.rule.id,
       olderActive.rule.id,
       stopped.rule.id,
     ])
     expect(rows.map(row => row.status)).toEqual(['active', 'active', 'stopped'])
-    expect(rows.map(row => row.materialized_occurrence_count)).toEqual([1, 1, 1])
+    expect(rows.map(row => row.materializedOccurrenceCount)).toEqual([1, 1, 1])
   })
 
   it('returns an empty recurring-rule list and enforces current eligibility', async () => {

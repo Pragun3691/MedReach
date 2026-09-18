@@ -1,10 +1,11 @@
 import { getPool } from '../db/pool.js'
 
 export class AvailabilityDataError extends Error {
-  constructor(code) {
+  constructor(code, details = null) {
     super(code)
     this.name = 'AvailabilityDataError'
     this.code = code
+    this.details = details
   }
 }
 
@@ -256,6 +257,111 @@ function recurringRuleFromRow(row) {
   }
 }
 
+function exceptionFromRow(row) {
+  return {
+    id: Number(row.id),
+    doctorId: Number(row.doctor_id),
+    date: calendarDate(row.exception_date),
+    allDay: row.all_day,
+    startTime: row.start_time === null ? null : clockTime(row.start_time),
+    endTime: row.end_time === null ? null : clockTime(row.end_time),
+    createdAt: new Date(row.created_at).toISOString(),
+  }
+}
+
+function exceptionInput(input) {
+  return {
+    doctorId: input.doctorId,
+    date: calendarDate(input.date),
+    allDay: input.allDay,
+    startTime: input.allDay ? null : clockTime(input.startTime),
+    endTime: input.allDay ? null : clockTime(input.endTime),
+  }
+}
+
+function assertExceptionIsNotPast(exception, now) {
+  const today = indiaDate(now)
+  if (exception.date < today) {
+    throw new AvailabilityDataError('AVAILABILITY_EXCEPTION_IN_PAST')
+  }
+  if (exception.date > today || exception.allDay) return
+
+  if (indiaInstant(exception.date, exception.endTime) <= now) {
+    throw new AvailabilityDataError('AVAILABILITY_EXCEPTION_IN_PAST')
+  }
+}
+
+async function assertNoActiveExceptionOverlap(client, exception) {
+  const result = await client.query(
+    `SELECT 1
+     FROM availability_exceptions existing_exception
+     WHERE existing_exception.doctor_id = $1
+       AND existing_exception.exception_date = $2::date
+       AND existing_exception.removed_at IS NULL
+       AND (
+         $3::boolean = TRUE
+         OR existing_exception.all_day = TRUE
+         OR (
+           existing_exception.start_time < $5::time
+           AND existing_exception.end_time > $4::time
+         )
+       )
+     LIMIT 1`,
+    [
+      exception.doctorId,
+      exception.date,
+      exception.allDay,
+      exception.startTime,
+      exception.endTime,
+    ],
+  )
+
+  if (result.rowCount > 0) {
+    throw new AvailabilityDataError('AVAILABILITY_EXCEPTION_OVERLAP')
+  }
+}
+
+function conflictTime(value) {
+  return new Date(value).toISOString()
+}
+
+async function assertNoBookedExceptionConflict(client, exception) {
+  const result = await client.query(
+    `SELECT slot.start_at, slot.end_at
+     FROM appointments appointment
+     JOIN slots slot ON slot.id = appointment.slot_id
+     JOIN availability_blocks block ON block.id = slot.availability_block_id
+     WHERE block.doctor_id = $1
+       AND appointment.status = 'booked'
+       AND (slot.start_at AT TIME ZONE 'Asia/Kolkata')::date = $2::date
+       AND (
+         $3::boolean = TRUE
+         OR (
+           (slot.start_at AT TIME ZONE 'Asia/Kolkata') < $2::date + $5::time
+           AND (slot.end_at AT TIME ZONE 'Asia/Kolkata') > $2::date + $4::time
+         )
+       )
+     ORDER BY slot.start_at, slot.id`,
+    [
+      exception.doctorId,
+      exception.date,
+      exception.allDay,
+      exception.startTime,
+      exception.endTime,
+    ],
+  )
+
+  if (result.rowCount > 0) {
+    throw new AvailabilityDataError('AVAILABILITY_EXCEPTION_BOOKED_CONFLICT', {
+      conflictCount: result.rowCount,
+      conflicts: result.rows.map(row => ({
+        startAt: conflictTime(row.start_at),
+        endAt: conflictTime(row.end_at),
+      })),
+    })
+  }
+}
+
 async function materializeRule(client, rule, now) {
   const { materializedThrough, occurrences } = occurrencesForRule(rule, now)
   await assertNoActiveRuleOverlap(client, rule, rule.id)
@@ -425,6 +531,53 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
         }))
     },
 
+    async listExceptions({ doctorId }, now = new Date()) {
+      const client = await databaseProvider().connect()
+      let result
+      try {
+        result = await client.query(
+          `SELECT
+             u.is_enabled,
+             verification.status AS verification_status,
+             availability_exception.id AS exception_id,
+             availability_exception.doctor_id,
+             availability_exception.exception_date,
+             availability_exception.all_day,
+             availability_exception.start_time,
+             availability_exception.end_time,
+             availability_exception.created_at
+           FROM users u
+           JOIN doctor_profiles profile ON profile.user_id = u.id
+           LEFT JOIN doctor_verifications verification ON verification.doctor_id = u.id
+           LEFT JOIN availability_exceptions availability_exception
+             ON availability_exception.doctor_id = u.id
+            AND availability_exception.removed_at IS NULL
+            AND availability_exception.exception_date >=
+              ($2::timestamptz AT TIME ZONE 'Asia/Kolkata')::date
+           WHERE u.id = $1
+             AND u.role = 'doctor'
+           ORDER BY availability_exception.exception_date,
+             availability_exception.start_time NULLS FIRST,
+             availability_exception.id`,
+          [doctorId, now],
+        )
+      } finally {
+        client.release()
+      }
+
+      const doctor = result.rows[0]
+      if (doctor && !doctor.is_enabled) {
+        throw new AvailabilityDataError('ACCOUNT_DISABLED')
+      }
+      if (!doctor || doctor.verification_status !== 'approved') {
+        throw new AvailabilityDataError('DOCTOR_NOT_APPROVED')
+      }
+
+      return result.rows
+        .filter(row => row.exception_id !== null)
+        .map(row => exceptionFromRow({ ...row, id: row.exception_id }))
+    },
+
     async listRecurringRulesForExtension(now = new Date()) {
       const client = await databaseProvider().connect()
       try {
@@ -497,6 +650,46 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
 
         return { block, slots: slotsResult.rows }
       })
+    },
+
+    async createException(input, now = new Date()) {
+      const exception = exceptionInput(input)
+      try {
+        return await withTransaction(databaseProvider, async client => {
+          await lockDoctorForAvailability(client, exception.doctorId)
+          assertExceptionIsNotPast(exception, now)
+          await assertNoActiveExceptionOverlap(client, exception)
+          await assertNoBookedExceptionConflict(client, exception)
+
+          const result = await client.query(
+            `INSERT INTO availability_exceptions (
+               doctor_id, exception_date, all_day, start_time, end_time
+             ) VALUES ($1, $2, $3, $4, $5)
+             RETURNING id, doctor_id, exception_date, all_day, start_time, end_time,
+               created_at`,
+            [
+              exception.doctorId,
+              exception.date,
+              exception.allDay,
+              exception.startTime,
+              exception.endTime,
+            ],
+          )
+
+          return exceptionFromRow(result.rows[0])
+        })
+      } catch (error) {
+        if (
+          error?.code === '23505'
+          && [
+            'availability_exceptions_active_all_day_unique',
+            'availability_exceptions_active_partial_unique',
+          ].includes(error.constraint)
+        ) {
+          throw new AvailabilityDataError('AVAILABILITY_EXCEPTION_OVERLAP')
+        }
+        throw error
+      }
     },
 
     async createRecurring(input, now = new Date()) {
@@ -702,6 +895,43 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
           'DELETE FROM availability_blocks WHERE id = $1 AND doctor_id = $2',
           [blockId, doctorId],
         )
+      })
+    },
+
+    async removeException({ doctorId, exceptionId }, now = new Date()) {
+      return withTransaction(databaseProvider, async client => {
+        await lockDoctorForAvailability(client, doctorId)
+
+        const ownedResult = await client.query(
+          `SELECT id, doctor_id, exception_date, all_day, start_time, end_time,
+             created_at, removed_at
+           FROM availability_exceptions
+           WHERE id = $1
+             AND doctor_id = $2
+           FOR UPDATE`,
+          [exceptionId, doctorId],
+        )
+        const owned = ownedResult.rows[0]
+        if (!owned) {
+          throw new AvailabilityDataError('AVAILABILITY_EXCEPTION_NOT_FOUND')
+        }
+
+        if (owned.removed_at !== null) {
+          return { exception: exceptionFromRow(owned), removed: false }
+        }
+
+        const result = await client.query(
+          `UPDATE availability_exceptions
+           SET removed_at = $3
+           WHERE id = $1
+             AND doctor_id = $2
+             AND removed_at IS NULL
+           RETURNING id, doctor_id, exception_date, all_day, start_time, end_time,
+             created_at`,
+          [exceptionId, doctorId, now],
+        )
+
+        return { exception: exceptionFromRow(result.rows[0]), removed: true }
       })
     },
   }
