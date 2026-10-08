@@ -43,6 +43,97 @@ fictional doctors, specializations, availability blocks and 30-minute slots.
 These seeded doctors exist only as public discovery data. They do not have
 usable login credentials and are not Doctor login accounts.
 
+## Production serving
+
+From the repository root, install with the existing client and server lockfiles,
+then build the frontend:
+
+```bash
+npm run install:deps
+npm run build
+```
+
+Set `NODE_ENV=production` in the server environment and run `npm start` from the
+repository root. In PowerShell, use `$env:NODE_ENV = 'production'` before
+`npm start`. The existing server environment loader also supports `server/.env`.
+The server listens on `PORT` (default 3000) using one Express process for both
+the API and generated `client/dist` files. The Vite server remains development-only.
+
+API routes run first; unknown `/api` endpoints retain the JSON 404 response.
+GET/HEAD HTML navigation to the page routes declared in `client/src/App.jsx`
+receives `index.html`, including direct links such as `/doctors/1` and
+`/doctor/availability`. Keep the page patterns in
+`server/src/middleware/frontend.js` aligned when adding frontend routes.
+Missing assets, unsupported methods and unknown page paths receive 404 responses.
+Only `client/dist` is a static file root; dotfiles are ignored.
+
+Production still requires a random `SESSION_SECRET` of at least 32 characters,
+`DATABASE_URL` and a prepared PostgreSQL schema including `user_sessions`.
+Use HTTPS behind the existing trusted proxy; production session cookies remain
+Secure, HttpOnly and SameSite=Lax. Keep database, session and JaaS credentials
+in the server environment; do not place them in Vite variables or frontend files.
+Dependency and build output are ignored by Git.
+
+## Production PostgreSQL and Railway pre-deploy
+
+Use Node 22.12+ (or Node 24.0+). From the repository root, the build command is
+`npm run install:deps && npm run build`; the start command is `npm start`.
+The install script explicitly includes development dependencies needed to build
+React even when `NODE_ENV=production`. `node-pg-migrate` is a server production
+dependency at the existing locked version, so it also survives
+`npm --prefix server ci --omit=dev` or pruning server development dependencies.
+Keep `server/migrations`, `server/scripts`, `server/src`, server production
+dependencies and generated `client/dist` in the final image. Do not run migrations
+during the frontend build or on every web-process startup.
+
+Configure the application service's Railway **Pre-Deploy Command** as:
+
+```bash
+npm run migrate:production
+```
+
+This root command forwards to `npm --prefix server run migrate:production`.
+It uses platform-injected variables and never loads a local `.env`. Railway runs
+pre-deploy commands inside the private network with service variables; a nonzero
+exit blocks deployment. See [Railway pre-deploy documentation](https://docs.railway.com/deployments/pre-deploy-command).
+The command validates connection settings, requires packaged migration files,
+applies every pending upward migration under the migration lock and a single
+transaction, and retains the existing `public.pgmigrations` history table.
+Missing configuration, TLS failures, unavailable files or migration errors exit
+nonzero. An already-current schema reports zero applied migrations explicitly.
+The command emits safe summaries rather than raw database errors or SQL.
+
+Required server variables are `NODE_ENV=production`, `DATABASE_URL`,
+`DATABASE_SSL` (choose `false` or `true`) and `SESSION_SECRET` (at least 32 random
+characters). Railway supplies `PORT`; the existing default is 3000. Migrations
+require `DATABASE_URL` and connection/TLS settings, but not a session secret.
+Video credentials remain server-only `JAAS_APP_ID`, `JAAS_API_KEY_ID`,
+`JAAS_PRIVATE_KEY_BASE64` and optional `JAAS_TOKEN_TTL_SECONDS`.
+
+For Railway private networking, reference the database service's private
+`DATABASE_URL` (hostname ending in `.railway.internal`) and set
+`DATABASE_SSL=false`. This explicitly disables PostgreSQL TLS over Railway's
+encrypted private network. Local PostgreSQL remains compatible with
+`DATABASE_SSL=false`. Production connections to other hostnames require
+`DATABASE_SSL=true`; use a hostname matching the server certificate.
+
+External TLS always verifies the certificate chain and hostname. Publicly trusted
+certificates use Node's trust store. For a private CA, optionally set
+`DATABASE_SSL_CA` to its PEM certificate (actual multiline contents). Application
+queries, PostgreSQL sessions and migrations use the same settings. Certificate
+failures must be fixed with a valid certificate/CA, never by disabling verification.
+Remove `ssl`, `sslmode`, `sslcert`, `sslkey`, `sslrootcert`, `sslnegotiation`,
+`uselibpqcompat` and `host` query parameters from `DATABASE_URL`; configuration
+rejects these because pg URL parameters can override explicit TLS settings.
+See [node-postgres TLS documentation](https://node-postgres.com/features/ssl).
+
+Local `npm --prefix server run migrate:up` and `migrate:down` still load
+`server/.env` when present; injected variables take precedence and an absent file
+is allowed. Downward migrations are refused with `NODE_ENV=production`.
+**Never run `npm run seed` or `seed:public-discovery` in production.** Pre-deploy
+must use only the upward migration command, never seeds, resets or rollback commands.
+No database has been provisioned or migrated as part of this configuration change.
+
 ## Public discovery API
 
 - `GET /api/specializations`

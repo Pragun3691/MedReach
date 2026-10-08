@@ -1,6 +1,7 @@
 import express from 'express'
 import { createAuthenticationMiddleware } from './middleware/authenticate.js'
 import { errorHandler } from './middleware/error-handler.js'
+import { createFrontendRouter } from './middleware/frontend.js'
 import { notFoundHandler } from './middleware/not-found.js'
 import { createAuthRouter } from './routes/auth.routes.js'
 import { createDoctorAvailabilityRouter } from './routes/availability.routes.js'
@@ -28,6 +29,7 @@ export function createApp({
   notifications = notificationService,
   specializations = specializationService,
   sessionMiddleware,
+  frontendDirectory,
 } = {}) {
   const app = express()
 
@@ -46,6 +48,11 @@ export function createApp({
   app.use('/api/doctors', createDoctorAppointmentRouter(appointments, authenticate))
   app.use('/api/doctors', createDoctorAvailabilityRouter(availability, authenticate))
   app.use('/api/doctors', createPublicDoctorRouter(doctors))
+
+  app.use('/api', notFoundHandler)
+  if (process.env.NODE_ENV === 'production') {
+    app.use(createFrontendRouter(frontendDirectory))
+  }
 
   app.use(notFoundHandler)
   app.use(errorHandler)

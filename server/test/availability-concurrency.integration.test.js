@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import pg from 'pg'
+import { createDatabaseConfig } from '../src/config/database.js'
 import { MigrationBuilder } from 'node-pg-migrate'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { up as upPublicDiscovery } from '../migrations/1788175200000_create-public-discovery-schema.js'
@@ -143,8 +144,7 @@ describeWithPostgres('availability PostgreSQL concurrency', () => {
 
   beforeAll(async () => {
     pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
+      ...createDatabaseConfig(process.env),
       statement_timeout: 5000,
     })
     schema = `availability_concurrency_${randomUUID().replaceAll('-', '')}`

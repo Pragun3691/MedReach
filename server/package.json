@@ -8,8 +8,9 @@
     "start": "node --env-file-if-exists=.env src/server.js",
     "lint": "oxlint .",
     "migrate:create": "node ./node_modules/node-pg-migrate/bin/node-pg-migrate.js create",
-    "migrate:up": "node --env-file=.env ./node_modules/node-pg-migrate/bin/node-pg-migrate.js up",
-    "migrate:down": "node --env-file=.env ./node_modules/node-pg-migrate/bin/node-pg-migrate.js down",
+    "migrate:up": "node --env-file-if-exists=.env scripts/migrate.js up",
+    "migrate:down": "node --env-file-if-exists=.env scripts/migrate.js down",
+    "migrate:production": "node scripts/migrate.js production",
     "verify:auth-schema": "node --env-file=.env scripts/verify-auth-schema.js",
     "verify:booking-schema": "node --env-file=.env scripts/verify-booking-schema.js",
     "verify:consultation-schema": "node --env-file=.env scripts/verify-booking-schema.js",
@@ -19,7 +20,6 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "node-pg-migrate": "^9.0.0",
     "oxlint": "^1.80.0",
     "supertest": "^7.2.2",
     "vitest": "^4.1.11"
@@ -30,6 +30,7 @@
     "express": "^5.2.1",
     "express-session": "^1.19.0",
     "jose": "^6.2.12",
+    "node-pg-migrate": "^9.0.0",
     "pg": "^8.23.0",
     "zod": "^4.5.4"
   }
