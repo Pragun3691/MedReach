@@ -100,6 +100,25 @@ export function deleteDoctorAvailability(blockId) {
   return requestJson(`/api/doctors/me/availability/${blockId}`, { method: 'DELETE' })
 }
 
+export function getAvailabilityExceptions(signal) {
+  return requestJson('/api/doctors/me/availability/exceptions', { signal })
+}
+
+export function createAvailabilityException(exception) {
+  return requestJson('/api/doctors/me/availability/exceptions', {
+    method: 'POST',
+    body: JSON.stringify(exception),
+  })
+}
+
+export function deleteAvailabilityException(exceptionId) {
+  return requestJson(`/api/doctors/me/availability/exceptions/${exceptionId}`, { method: 'DELETE' })
+}
+
+export function deleteAvailabilityExceptionRange(rangeId) {
+  return requestJson(`/api/doctors/me/availability/exceptions/ranges/${rangeId}`, { method: 'DELETE' })
+}
+
 export function listDoctorRecurringAvailability(signal) {
   return requestJson('/api/doctors/me/availability/rules', { signal })
 }

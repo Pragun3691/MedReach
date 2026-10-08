@@ -4,9 +4,13 @@ import { PublicFooter } from '../components/PublicFooter.jsx'
 import { PublicHeader } from '../components/PublicHeader.jsx'
 import { useModalDialog } from '../hooks/useModalDialog.js'
 import {
+  createAvailabilityException,
   createDoctorAvailability,
   createDoctorRecurringAvailability,
+  deleteAvailabilityException,
+  deleteAvailabilityExceptionRange,
   deleteDoctorAvailability,
+  getAvailabilityExceptions,
   listDoctorAvailability,
   listDoctorRecurringAvailability,
   stopDoctorRecurringAvailability,
@@ -15,6 +19,9 @@ import { formatAppointmentTime, formatFee } from '../lib/appointment-format.js'
 import { isoToIndiaDate, todayInIndia } from '../lib/date.js'
 
 const initialForm = { date: '', startTime: '', endTime: '', fee: '' }
+const initialTimeOffForm = {
+  duration: 'one-day', date: '', startDate: '', endDate: '', allDay: false, startTime: '', endTime: '',
+}
 const initialRecurringForm = {
   weekdays: [], startTime: '', endTime: '', startsOn: '', endMode: 'none', endsOn: '', fee: '',
 }
@@ -29,6 +36,7 @@ const weekdayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'S
 
 const friendlyErrors = {
   AVAILABILITY_OVERLAP: 'This time overlaps with availability you already added.',
+  AVAILABILITY_EXCEPTION_CONFLICT: 'This time overlaps time off you added. Remove the time off or choose another time.',
   AVAILABILITY_IN_PAST: 'Choose a future date and time.',
   RECURRING_AVAILABILITY_IN_PAST: 'Choose a schedule that includes future availability.',
   ACCOUNT_DISABLED: 'This account is disabled. Availability can’t be changed.',
@@ -100,7 +108,10 @@ function monthFromDate(date) {
   return new Date(Date.UTC(year, month - 1, 1))
 }
 
-function CalendarField({ value, onChange, buttonRef, id = 'availability-calendar', label = 'Date', minDate }) {
+function CalendarField({
+  value, onChange, buttonRef, id = 'availability-calendar', label = 'Date', minDate,
+  disabled = false, invalid = false,
+}) {
   const [open, setOpen] = useState(false)
   const [visibleMonth, setVisibleMonth] = useState(() => monthFromDate(value || minDate))
   const fieldRef = useRef(null)
@@ -138,7 +149,7 @@ function CalendarField({ value, onChange, buttonRef, id = 'availability-calendar
         buttonRef.current?.focus()
       }
     }}>
-      <button aria-controls={id} aria-expanded={open} aria-label={value ? `${label}, ${formatSelectedDate(value)}` : `${label}, choose a date`} className="availability-calendar-trigger" onClick={() => {
+      <button aria-controls={id} aria-expanded={open} aria-invalid={invalid || undefined} aria-label={value ? `${label}, ${formatSelectedDate(value)}` : `${label}, choose a date`} className="availability-calendar-trigger" disabled={disabled} onClick={() => {
         if (!open && minDate && visibleMonth < monthFromDate(minDate)) setVisibleMonth(monthFromDate(minDate))
         setOpen(current => !current)
       }} ref={buttonRef} type="button">
@@ -179,6 +190,30 @@ function formatTimeOption(value) {
 
 function formatAvailabilityTime(value) {
   return formatAppointmentTime(value).replace(/\b(am|pm)\b/gi, period => period.toUpperCase())
+}
+
+function indiaTime(value) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Kolkata',
+  }).formatToParts(new Date(value)).map(part => [part.type, part.value]))
+  return `${parts.hour}:${parts.minute}`
+}
+
+function timeOffDefaults(date, blocks) {
+  if (!date || date < todayInIndia()) return initialTimeOffForm
+  const earliestBookableSlot = blocks
+    .flatMap(block => block.slots ?? [])
+    .filter(slot => slot.isBookable === true && isoToIndiaDate(slot.startAt) === date)
+    .sort((left, right) => new Date(left.startAt) - new Date(right.startAt))[0]
+
+  if (!earliestBookableSlot) return { ...initialTimeOffForm, date }
+  const start = new Date(earliestBookableSlot.startAt)
+  return {
+    ...initialTimeOffForm,
+    date,
+    startTime: indiaTime(start),
+    endTime: indiaTime(new Date(start.getTime() + 30 * 60 * 1000)),
+  }
 }
 
 const timePeriods = [
@@ -407,6 +442,31 @@ function formatRuleDate(date) {
   return `${day} ${monthName} ${year}`
 }
 
+function addCalendarDays(date, days) {
+  const value = new Date(`${date}T00:00:00.000Z`)
+  value.setUTCDate(value.getUTCDate() + days)
+  return value.toISOString().slice(0, 10)
+}
+
+function calendarDayDifference(startDate, endDate) {
+  return Math.round((new Date(`${endDate}T00:00:00.000Z`) - new Date(`${startDate}T00:00:00.000Z`)) / 86400000)
+}
+
+function rangeDateLabel(startDate, endDate, { short = false } = {}) {
+  const [startYear, startMonth, startDay] = startDate.split('-').map(Number)
+  const [endYear, endMonth, endDay] = endDate.split('-').map(Number)
+  const months = short
+    ? ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    : ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+  if (startYear === endYear && startMonth === endMonth) {
+    return `${startDay}–${endDay} ${months[startMonth - 1]}${short ? '' : ` ${startYear}`}`
+  }
+  if (startYear === endYear) {
+    return `${startDay} ${months[startMonth - 1]} – ${endDay} ${months[endMonth - 1]}${short ? '' : ` ${startYear}`}`
+  }
+  return `${startDay} ${months[startMonth - 1]} ${startYear} – ${endDay} ${months[endMonth - 1]} ${endYear}`
+}
+
 function recurringPreviewFor(form) {
   if (validateRecurringForm(form)) return null
   return {
@@ -420,8 +480,8 @@ function recurringPreviewFor(form) {
 
 function slotState(slot) {
   if (slot.isBooked) return 'Booked'
-  if (slot.hasAppointmentHistory) return 'Protected'
-  if (slot.isActive) return 'Available'
+  if (slot.isActive && slot.isExceptionBlocked) return 'Blocked'
+  if (slot.isBookable) return 'Available'
   return 'Unavailable'
 }
 
@@ -493,6 +553,181 @@ function AvailabilityDialog({ onClose, onCreated }) {
           <div className="availability-dialog__actions">
             <button className="availability-button availability-button--secondary" disabled={pending} onClick={guardedClose} type="button">Cancel</button>
             <button className="availability-button availability-button--primary" disabled={pending} type="submit">{pending ? 'Adding…' : 'Add availability'}</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  )
+}
+
+function validateTimeOffForm(form) {
+  if (form.duration === 'range') {
+    if (!form.startDate) return { field: 'startDate', message: 'Choose a start date.' }
+    if (form.startDate < todayInIndia()) return { field: 'startDate', message: 'Choose today or a future date.' }
+    if (!form.endDate) return { field: 'endDate', message: 'Choose an end date.' }
+    const difference = calendarDayDifference(form.startDate, form.endDate)
+    if (difference <= 0) return { field: 'endDate', message: 'End date must be after start date.' }
+    if (difference > 30) return { field: 'endDate', message: 'Time off can cover up to 31 days at a time.' }
+    return null
+  }
+  if (!form.date) return 'Choose a date.'
+  if (form.date < todayInIndia()) return 'Choose today or a future date.'
+  if (form.allDay) return ''
+  if (!form.startTime || !form.endTime) return 'Choose a start time and an end time.'
+  if (minutes(form.endTime) <= minutes(form.startTime)) return 'End time must be after start time.'
+  if (new Date(`${form.date}T${form.endTime}:00+05:30`) <= new Date()) return 'Choose a time off interval that has not fully elapsed.'
+  return ''
+}
+
+function timeOffRequestError(error, isRange = false) {
+  if (error?.code === 'AVAILABILITY_EXCEPTION_BOOKED_CONFLICT') {
+    const conflictCount = error.conflictCount ?? error.details?.conflictCount
+    if (isRange) {
+      return conflictCount
+        ? `Time off can’t be added because ${conflictCount} booked ${conflictCount === 1 ? 'appointment falls' : 'appointments fall'} within this period.`
+        : 'Time off can’t be added because a booked appointment falls within this period.'
+    }
+    return conflictCount
+      ? `Time off can’t be added because ${conflictCount} booked ${conflictCount === 1 ? 'appointment overlaps' : 'appointments overlap'} this period.`
+      : 'Time off can’t be added because a booked appointment overlaps this period.'
+  }
+  if (error?.code === 'AVAILABILITY_EXCEPTION_OVERLAP') return isRange
+    ? 'This date range overlaps time off you already added.'
+    : 'This period overlaps time off you already added.'
+  if (error?.code === 'AVAILABILITY_EXCEPTION_IN_PAST') return 'This time has already passed.'
+  if (isRange && error?.code === 'AVAILABILITY_EXCEPTION_RANGE_INVALID') return 'Time off can cover up to 31 days at a time.'
+  if (error?.code === 'VALIDATION_ERROR') {
+    if (isRange && (error.details ?? []).some(detail => /31|exceed/i.test(detail.message ?? ''))) {
+      return 'Time off can cover up to 31 days at a time.'
+    }
+    return isRange ? 'Check the start and end dates, then try again.' : 'Check the date and times, then try again.'
+  }
+  return friendlyErrors[error?.code] ?? 'We could not add this time off. Please try again.'
+}
+
+function TimeOffDialog({ initialValues = initialTimeOffForm, onClose, onCreated }) {
+  const [form, setForm] = useState(() => ({ ...initialTimeOffForm, ...initialValues }))
+  const [pending, setPending] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
+  const [requestError, setRequestError] = useState('')
+  const dialogRef = useRef(null)
+  const dateRef = useRef(null)
+  const rangeStartRef = useRef(null)
+  const rangeEndRef = useRef(null)
+  const guardedClose = useCallback(() => { if (!pending) onClose() }, [onClose, pending])
+  useModalDialog({ open: true, onClose: guardedClose, dialogRef, initialFocusRef: dateRef })
+  const validationError = validateTimeOffForm(form)
+  const validationMessage = typeof validationError === 'string' ? validationError : validationError?.message
+  const endTimeOptions = useMemo(() => form.startTime
+    ? halfHourTimes.filter(time => minutes(time) > minutes(form.startTime))
+    : [], [form.startTime])
+
+  function updateForm(field, value) {
+    setForm(current => ({ ...current, [field]: value }))
+    setRequestError('')
+  }
+
+  function updateStartTime(value) {
+    setForm(current => ({
+      ...current,
+      startTime: value,
+      endTime: current.endTime && minutes(current.endTime) > minutes(value) ? current.endTime : '',
+    }))
+    setRequestError('')
+  }
+
+  function updateDuration(duration) {
+    setForm(current => ({
+      ...current,
+      duration,
+      startDate: duration === 'range' ? current.startDate || current.date : current.startDate,
+    }))
+    setSubmitted(false)
+    setRequestError('')
+  }
+
+  function updateRangeStart(startDate) {
+    setForm(current => {
+      const latestEnd = addCalendarDays(startDate, 30)
+      const endDate = current.endDate > startDate && current.endDate <= latestEnd ? current.endDate : ''
+      return { ...current, startDate, endDate }
+    })
+    setRequestError('')
+  }
+
+  async function submit(event) {
+    event.preventDefault()
+    setSubmitted(true)
+    setRequestError('')
+    if (validationError) return
+    const isRange = form.duration === 'range'
+    const payload = isRange
+      ? { startDate: form.startDate, endDate: form.endDate, allDay: true }
+      : form.allDay
+        ? { date: form.date, allDay: true }
+        : { date: form.date, allDay: false, startTime: form.startTime, endTime: form.endTime }
+    setPending(true)
+    try {
+      await createAvailabilityException(payload)
+      onCreated(
+        isRange ? form.startDate : form.date,
+        isRange ? `Time off added for ${rangeDateLabel(form.startDate, form.endDate, { short: true })}.` : undefined,
+      )
+    } catch (error) {
+      setRequestError(timeOffRequestError(error, isRange))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <div className="availability-dialog-backdrop" onMouseDown={event => event.target === event.currentTarget && guardedClose()} role="presentation">
+      <section aria-labelledby="add-time-off-heading" aria-modal="true" className="availability-dialog" ref={dialogRef} role="dialog">
+        <div className="availability-dialog__heading">
+          <div><h2 id="add-time-off-heading">Add time off</h2></div>
+          <button aria-label="Close time off dialog" disabled={pending} onClick={guardedClose} type="button">&times;</button>
+        </div>
+        <p className="availability-dialog__copy">Block booking for a date or part of a day. Your regular schedule stays unchanged.</p>
+        <form noValidate onSubmit={submit}>
+          <fieldset className="availability-time-off-mode">
+            <legend>Duration</legend>
+            <div>
+              <label><input checked={form.duration === 'one-day'} name="time-off-mode" onChange={() => updateDuration('one-day')} type="radio" /><span>One day</span></label>
+              <label><input checked={form.duration === 'range'} name="time-off-mode" onChange={() => updateDuration('range')} type="radio" /><span>Date range</span></label>
+            </div>
+          </fieldset>
+          {form.duration === 'one-day' ? <>
+            <div className="availability-dialog__field"><span>Date</span><CalendarField buttonRef={dateRef} id="time-off-calendar" label="Time off date" onChange={date => updateForm('date', date)} value={form.date} /></div>
+            <fieldset className="availability-end-choice availability-time-off-choice">
+            <legend>Time off type</legend>
+            <label><input checked={!form.allDay} name="time-off-duration" onChange={() => updateForm('allDay', false)} type="radio" /> Specific hours</label>
+            <label><input checked={form.allDay} name="time-off-duration" onChange={() => updateForm('allDay', true)} type="radio" /> All day</label>
+            </fieldset>
+          {!form.allDay && <div className="availability-dialog__times">
+            <TimePicker id="time-off-start" label="Start time" onChange={updateStartTime} options={startTimeOptions} value={form.startTime} />
+            <TimePicker disabled={!form.startTime} id="time-off-end" label="End time" onChange={time => updateForm('endTime', time)} options={endTimeOptions} value={form.endTime} />
+          </div>}
+          </> : <>
+            <div className="availability-dialog__times availability-dialog__range-dates">
+              <div className="availability-dialog__field"><span>Start date</span><CalendarField buttonRef={rangeStartRef} id="time-off-start-calendar" invalid={submitted && validationError?.field === 'startDate'} label="Start date" onChange={updateRangeStart} value={form.startDate} /></div>
+              <div className="availability-dialog__field"><span>End date</span><CalendarField buttonRef={rangeEndRef} disabled={!form.startDate} id="time-off-end-calendar" invalid={submitted && validationError?.field === 'endDate'} label="End date" minDate={form.startDate ? addCalendarDays(form.startDate, 1) : undefined} onChange={endDate => updateForm('endDate', endDate)} value={form.endDate} /></div>
+            </div>
+            <p className="availability-dialog__hint availability-dialog__range-hint">All selected days will be unavailable.</p>
+          </>}
+          {!validationError && <div className="availability-dialog__preview" aria-live="polite">
+            {form.duration === 'range' ? <>
+              <strong>{rangeDateLabel(form.startDate, form.endDate)}</strong>
+              <span>Unavailable all day</span>
+            </> : <>
+            <strong>{formatAvailabilityDate(form.date)}</strong>
+            <span>{form.allDay ? 'Unavailable all day' : `${formatTimeOption(form.startTime)} – ${formatTimeOption(form.endTime)} unavailable`}</span>
+            </>}
+          </div>}
+          {submitted && validationError && <p className="availability-dialog__error" role="alert">{validationMessage}</p>}
+          {requestError && <div className="availability-dialog__error" role="alert"><p>{requestError}</p>{requestError.includes('appointment') && <Link to="/doctor/appointments">View appointments</Link>}</div>}
+          <div className="availability-dialog__actions">
+            <button className="availability-button availability-button--secondary" disabled={pending} onClick={guardedClose} type="button">Cancel</button>
+            <button className="availability-button availability-button--primary" disabled={pending} type="submit">{pending ? 'Adding...' : 'Add time off'}</button>
           </div>
         </form>
       </section>
@@ -695,25 +930,31 @@ function StopScheduleDialog({ rule, onClose, onStopped }) {
   )
 }
 
-function RecurringRule({ rule, onStop }) {
+function recurringRuleDisplayStatus(rule, today = todayInIndia()) {
+  return rule.status === 'active' && rule.endsOn && rule.endsOn < today
+    ? 'ended'
+    : rule.status
+}
+
+function RecurringRule({ rule, onStop, status = recurringRuleDisplayStatus(rule) }) {
   const dayLabel = rule.weekdays.map(value => weekdays[value - 1]).join(' · ')
   const dateLabel = rule.endsOn
     ? `${formatRuleDate(rule.startsOn)} – ${formatRuleDate(rule.endsOn)}`
     : `Starting ${formatRuleDate(rule.startsOn)} · No end date`
   return (
-    <article className="availability-rule" data-status={rule.status}>
+    <article className="availability-rule" data-status={status}>
       <div className="availability-rule__main">
         <div>
           <strong>{dayLabel}</strong>
           <p>{formatTimeOption(rule.startTime)} – {formatTimeOption(rule.endTime)}</p>
         </div>
-        <span className="availability-rule__status">{rule.status === 'active' ? 'Active' : 'Stopped'}</span>
+        <span className="availability-rule__status">{status === 'active' ? 'Active' : status === 'ended' ? 'Ended' : 'Stopped'}</span>
       </div>
       <div className="availability-rule__meta">
         <span>{dateLabel}</span>
         <span>{formatFee(rule.effectiveFee, 'en-IN', 'Fee not specified')}{rule.effectiveFee === null || rule.effectiveFee === undefined ? '' : ' per consultation'}</span>
       </div>
-      {rule.status === 'active' && <button className="availability-rule__stop" onClick={() => onStop(rule)} type="button">Stop schedule</button>}
+      {status === 'active' && <button className="availability-rule__stop" onClick={() => onStop(rule)} type="button">Stop schedule</button>}
     </article>
   )
 }
@@ -728,7 +969,100 @@ function PreviousSchedules({ rules }) {
         <span>Previous schedules ({rules.length})</span>
         <span aria-hidden="true">{open ? '−' : '+'}</span>
       </button>
-      {open && <div className="availability-rules availability-rules--previous" id={contentId}>{rules.map(rule => <RecurringRule key={rule.id} onStop={() => {}} rule={rule} />)}</div>}
+      {open && <div className="availability-rules availability-rules--previous" id={contentId}>{rules.map(({ rule, status }) => <RecurringRule key={rule.id} onStop={() => {}} rule={rule} status={status} />)}</div>}
+    </div>
+  )
+}
+
+function timeOffRange(exception) {
+  return exception.allDay
+    ? 'All day'
+    : `${formatTimeOption(exception.startTime)} – ${formatTimeOption(exception.endTime)}`
+}
+
+function logicalTimeOffEntries(exceptions) {
+  const entries = new Map()
+  for (const exception of exceptions) {
+    const key = exception.rangeId ? `range-${exception.rangeId}` : `exception-${exception.id}`
+    if (!entries.has(key)) {
+      entries.set(key, exception.rangeId ? {
+        ...exception,
+        id: key,
+        selectionDate: exception.date,
+        date: exception.rangeStartDate,
+        rangeStartDate: exception.rangeStartDate,
+        rangeEndDate: exception.rangeEndDate,
+        allDay: true,
+      } : exception)
+    }
+  }
+  return [...entries.values()].sort((left, right) => (
+    left.date.localeCompare(right.date) || (left.startTime ?? '').localeCompare(right.startTime ?? '')
+  ))
+}
+
+function timeOffDateLabel(exception, options) {
+  return exception.rangeId
+    ? rangeDateLabel(exception.rangeStartDate, exception.rangeEndDate, options)
+    : formatRuleDate(exception.date)
+}
+
+function TimeOffSummary({ entries, onRemove }) {
+  const [showAll, setShowAll] = useState(false)
+  const visible = showAll ? entries : entries.slice(0, 3)
+  return (
+    <div className="availability-time-off-list">
+      {visible.map(exception => <article className="availability-time-off-summary" key={exception.id}>
+        <div><strong>{timeOffDateLabel(exception, { short: true })}</strong><span>{exception.allDay ? 'All day' : timeOffRange(exception)}</span></div>
+        <button onClick={() => onRemove(exception)} type="button">Remove time off</button>
+      </article>)}
+      {entries.length > 3 && <button aria-expanded={showAll} className="availability-time-off-toggle" onClick={() => setShowAll(value => !value)} type="button">{showAll ? 'Show less' : `Show all time off (${entries.length})`}</button>}
+    </div>
+  )
+}
+
+function SelectedTimeOff({ exception, onRemove }) {
+  return (
+    <article className="availability-time-off-detail">
+      <div><span>Unavailable</span><strong>{timeOffRange(exception)}</strong>{exception.rangeId && <small>{timeOffDateLabel(exception, { short: true })}</small>}</div>
+      <button onClick={() => onRemove(exception)} type="button">Remove time off</button>
+    </article>
+  )
+}
+
+function RemoveTimeOffDialog({ exception, onClose, onRemoved }) {
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState('')
+  const dialogRef = useRef(null)
+  const cancelRef = useRef(null)
+  const guardedClose = useCallback(() => { if (!pending) onClose() }, [onClose, pending])
+  useModalDialog({ open: true, onClose: guardedClose, dialogRef, initialFocusRef: cancelRef })
+
+  async function remove() {
+    setPending(true)
+    setError('')
+    try {
+      if (exception.rangeId) await deleteAvailabilityExceptionRange(exception.rangeId)
+      else await deleteAvailabilityException(exception.id)
+      onRemoved(exception.selectionDate ?? exception.date)
+    } catch (requestError) {
+      setError(friendlyError(requestError, 'We could not remove this time off. Please try again.'))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <div className="availability-dialog-backdrop" onMouseDown={event => event.target === event.currentTarget && guardedClose()} role="presentation">
+      <section aria-labelledby="remove-time-off-heading" aria-modal="true" className="availability-dialog availability-dialog--confirm" ref={dialogRef} role="dialog">
+        <p className="availability-dialog__eyebrow">Time off</p><h2 id="remove-time-off-heading">{exception.rangeId ? `Remove ${timeOffDateLabel(exception, { short: true })} time off?` : 'Remove this time off?'}</h2>
+        <p className="availability-dialog__copy">Any underlying active availability {exception.rangeId ? 'across these dates' : 'for this period'} may become bookable again. Existing appointments will not be changed.</p>
+        {error && <p className="availability-dialog__error" role="alert">{error}</p>}
+        <div className="availability-dialog__actions">
+          <button className="availability-button availability-button--secondary" disabled={pending} onClick={guardedClose} ref={cancelRef} type="button">Keep time off</button>
+          <button className="availability-button availability-button--danger" disabled={pending} onClick={remove} type="button">{pending ? 'Removing...' : 'Remove time off'}</button>
+        </div>
+      </section>
     </div>
   )
 }
@@ -736,8 +1070,15 @@ function PreviousSchedules({ rules }) {
 function AvailabilityBlock({ block, onDelete }) {
   const [expanded, setExpanded] = useState(false)
   const slotsId = `availability-block-${block.id}-slots`
-  const availableCount = block.slots.filter(slot => slotState(slot) === 'Available').length
+  const availableCount = block.slots.filter(slot => slot.isBookable).length
   const bookedCount = block.slots.filter(slot => slot.isBooked).length
+  const blockedCount = block.slots.filter(slot => !slot.isBooked && slot.isActive && slot.isExceptionBlocked).length
+  const counts = [
+    `${block.slots.length} slots`,
+    availableCount ? `${availableCount} available` : null,
+    bookedCount ? `${bookedCount} booked` : null,
+    blockedCount ? `${blockedCount} blocked` : null,
+  ].filter(Boolean).join(' · ')
   const isOneOff = block.recurringRuleId === null
   const sourceLabel = isOneOff
     ? 'One-off'
@@ -750,7 +1091,7 @@ function AvailabilityBlock({ block, onDelete }) {
       <div className="availability-block__summary">
         <div>
           <strong>{formatAvailabilityTime(block.startAt)} – {formatAvailabilityTime(block.endAt)}</strong>
-          <span>{block.slots.length} slots · {availableCount} available · {bookedCount} booked</span>
+          <span>{counts}</span>
           <span className="availability-block__source">{sourceLabel}</span>
         </div>
         <p>{formatFee(block.effectiveFee, 'en-IN', 'Fee not specified')}{block.effectiveFee === null || block.effectiveFee === undefined ? '' : ' per consultation'}</p>
@@ -770,32 +1111,48 @@ function AvailabilityBlock({ block, onDelete }) {
   )
 }
 
-function AvailabilityCalendar({ groups, onDelete }) {
+function AvailabilityCalendar({ exceptions, exceptionsError, groups, navigationTarget, onAddTimeOff, onDelete, onRemoveTimeOff, onSelectedDateChange }) {
   const today = todayInIndia()
   const groupedByDate = new Map(groups)
-  const firstAvailableDate = groups[0]?.[0] ?? null
-  const lastAvailableDate = groups.at(-1)?.[0] ?? null
+  const exceptionsByDate = new Map()
+  for (const exception of exceptions) {
+    if (!exceptionsByDate.has(exception.date)) exceptionsByDate.set(exception.date, [])
+    exceptionsByDate.get(exception.date).push(exception)
+  }
+  const dateHasBookableAvailability = date => (groupedByDate.get(date) ?? []).some(block => block.slots.some(slot => slot.isBookable))
+  const firstAvailableDate = groups.find(([date]) => dateHasBookableAvailability(date))?.[0] ?? null
+  const firstExceptionDate = exceptions[0]?.date ?? null
+  const initialSelectedDate = navigationTarget?.date || firstAvailableDate || firstExceptionDate
   const currentMonth = monthFromDate(today)
-  const lastAvailableMonth = monthFromDate(lastAvailableDate || today)
+  const usefulDates = [...groups.map(([date]) => date), ...exceptions.map(exception => exception.date)]
+  const lastUsefulDate = [...usefulDates].sort().at(-1) ?? today
   const minMonthTime = currentMonth.getTime()
-  const maxMonthTime = Math.max(currentMonth.getTime(), lastAvailableMonth.getTime())
-  const [visibleMonth, setVisibleMonth] = useState(() => monthFromDate(firstAvailableDate || today))
-  const [selectedDate, setSelectedDate] = useState(firstAvailableDate)
+  const maxMonthTime = Math.max(minMonthTime, monthFromDate(lastUsefulDate).getTime())
+  const [visibleMonth, setVisibleMonth] = useState(() => monthFromDate(initialSelectedDate || today))
+  const [selectedDate, setSelectedDate] = useState(initialSelectedDate)
   const visibleMonthTime = Math.min(maxMonthTime, Math.max(minMonthTime, visibleMonth.getTime()))
   const displayedMonth = new Date(visibleMonthTime)
-  const monthLabel = new Intl.DateTimeFormat('en-IN', {
-    month: 'long', year: 'numeric', timeZone: 'UTC',
-  }).format(displayedMonth)
+  const monthLabel = new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(displayedMonth)
   const days = calendarDays(displayedMonth)
   const visibleMonthKey = `${displayedMonth.getUTCFullYear()}-${String(displayedMonth.getUTCMonth() + 1).padStart(2, '0')}`
-  const monthHasAvailability = groups.some(([date]) => date.startsWith(visibleMonthKey))
-  const selectedBlocks = selectedDate ? groupedByDate.get(selectedDate) : null
+  const monthHasUsefulDate = usefulDates.some(date => date.startsWith(visibleMonthKey))
+  const selectedBlocks = selectedDate ? groupedByDate.get(selectedDate) ?? [] : []
+  const selectedExceptions = selectedDate ? exceptionsByDate.get(selectedDate) ?? [] : []
+  const selectedTimeOffEntries = logicalTimeOffEntries(selectedExceptions)
+  const hasAllDayException = selectedExceptions.some(exception => exception.allDay)
+
+  useEffect(() => {
+    onSelectedDateChange(selectedDate ?? '')
+  }, [onSelectedDateChange, selectedDate])
 
   function moveMonth(offset) {
     const nextMonth = new Date(Date.UTC(displayedMonth.getUTCFullYear(), displayedMonth.getUTCMonth() + offset, 1))
     const nextMonthKey = `${nextMonth.getUTCFullYear()}-${String(nextMonth.getUTCMonth() + 1).padStart(2, '0')}`
+    const nextDate = groups.find(([date]) => date.startsWith(nextMonthKey) && dateHasBookableAvailability(date))?.[0]
+      ?? exceptions.find(exception => exception.date.startsWith(nextMonthKey))?.date
+      ?? null
     setVisibleMonth(nextMonth)
-    setSelectedDate(groups.find(([date]) => date.startsWith(nextMonthKey))?.[0] ?? null)
+    setSelectedDate(nextDate)
   }
 
   function selectToday() {
@@ -805,7 +1162,7 @@ function AvailabilityCalendar({ groups, onDelete }) {
 
   return (
     <div className="availability-browser">
-      <div className="availability-browser__calendar" aria-label="Availability by date" role="group">
+      <div className="availability-browser__calendar" aria-label="Availability and time off by date" role="group">
         <p className="availability-browser__eyebrow">Availability</p>
         <div className="availability-browser__month-header">
           <h2 aria-live="polite" id="availability-calendar-heading">{monthLabel}</h2>
@@ -815,37 +1172,51 @@ function AvailabilityCalendar({ groups, onDelete }) {
             <button aria-label="Next month" className="availability-browser__month-nav" disabled={visibleMonthTime >= maxMonthTime} onClick={() => moveMonth(1)} type="button">›</button>
           </div>
         </div>
+        {exceptionsError && <p className="availability-browser__load-warning" role="status">Time off markers could not be loaded.</p>}
         <div className="availability-browser__weekdays" aria-hidden="true">{weekdays.map(day => <span key={day}>{day}</span>)}</div>
         <div className="availability-browser__days">
           {days.map((date, index) => {
             if (!date) return <span aria-hidden="true" key={`blank-${index}`} />
-            const blocks = groupedByDate.get(date)
-            const hasAvailability = Boolean(blocks?.length)
+            const hasAvailability = dateHasBookableAvailability(date)
+            const hasTimeOff = exceptionsByDate.has(date)
             const isPast = date < today
+            const status = hasAvailability && hasTimeOff
+              ? ', bookable availability and time off'
+              : hasAvailability ? ', bookable availability' : hasTimeOff ? ', time off' : ', no bookable availability'
             return <button
               aria-current={date === today ? 'date' : undefined}
-              aria-label={`${hasAvailability ? 'View' : 'Select'} ${formatAvailabilityDate(date)} ${date.slice(0, 4)}${hasAvailability ? `, ${blocks.length} ${blocks.length === 1 ? 'block' : 'blocks'}` : ', no availability'}`}
+              aria-label={`${hasAvailability ? 'View' : 'Select'} ${formatAvailabilityDate(date)} ${date.slice(0, 4)}${status}`}
               aria-selected={selectedDate === date}
               data-available={hasAvailability || undefined}
               data-past={isPast || undefined}
+              data-time-off={hasTimeOff || undefined}
               disabled={isPast}
               key={date}
               onClick={() => setSelectedDate(date)}
               type="button"
             >
               <span className="availability-browser__date-number">{Number(date.slice(-2))}</span>
-              {hasAvailability && <i aria-hidden="true" />}
+              <span aria-hidden="true" className="availability-browser__markers">
+                {hasAvailability && <i className="availability-browser__availability-marker" />}
+                {hasTimeOff && <i className="availability-browser__time-off-marker" />}
+              </span>
             </button>
           })}
         </div>
-        {!monthHasAvailability && <p className="availability-browser__empty-month">No bookable time this month.</p>}
+        {!monthHasUsefulDate && <p className="availability-browser__empty-month">No availability or time off this month.</p>}
       </div>
 
       <div className="availability-browser__detail" aria-live="polite">
-        {selectedBlocks ? <section className="availability-date availability-date--selected" aria-labelledby={`availability-browse-date-${selectedDate}`}>
-          <h3 id={`availability-browse-date-${selectedDate}`}>{formatAvailabilityDate(selectedDate)}</h3>
-          <div>{selectedBlocks.map(block => <AvailabilityBlock block={block} key={`${selectedDate}-${block.id}`} onDelete={onDelete} />)}</div>
-        </section> : selectedDate ? <div className="availability-browser__date-empty"><h3>{formatAvailabilityDate(selectedDate)}</h3><p>No bookable time on this date.</p></div> : groups.length === 0 ? <div className="availability-browser__empty"><h3>No bookable availability yet.</h3><p>Set a regular schedule or add one-off time to start accepting bookings.</p></div> : <div className="availability-browser__date-empty"><p>Select a future date to see availability.</p></div>}
+        {selectedDate ? <section className="availability-date availability-date--selected" aria-labelledby={`availability-browse-date-${selectedDate}`}>
+          <div className="availability-date__heading">
+            <h3 id={`availability-browse-date-${selectedDate}`}>{formatAvailabilityDate(selectedDate)}</h3>
+            {!exceptionsError && !hasAllDayException && <button className="availability-button availability-button--secondary availability-date__mark-unavailable" onClick={() => onAddTimeOff(selectedDate)} type="button">Mark unavailable</button>}
+          </div>
+          {selectedTimeOffEntries.length > 0 && <section aria-label="Unavailable periods" className="availability-date__time-off">{selectedTimeOffEntries.map(exception => <SelectedTimeOff exception={exception} key={exception.id} onRemove={onRemoveTimeOff} />)}</section>}
+          {selectedBlocks.length > 0
+            ? <div>{selectedBlocks.map(block => <AvailabilityBlock block={block} key={`${selectedDate}-${block.id}`} onDelete={onDelete} />)}</div>
+            : <div className="availability-browser__date-empty"><p>No bookable availability on this date.</p></div>}
+        </section> : groups.length === 0 && exceptions.length === 0 ? <div className="availability-browser__empty"><h3>No bookable availability yet.</h3><p>Set a regular schedule, add one-off time, or block time off as needed.</p></div> : <div className="availability-browser__date-empty"><p>Select a future date to see availability and time off.</p></div>}
       </div>
     </div>
   )
@@ -853,25 +1224,59 @@ function AvailabilityCalendar({ groups, onDelete }) {
 
 export function DoctorAvailabilityPage() {
   const [requestVersion, setRequestVersion] = useState(0)
-  const [state, setState] = useState({ key: null, availability: null, rules: null, error: null })
+  const [state, setState] = useState({ key: null, availability: null, rules: null, exceptions: null, exceptionsError: null, refreshError: null, error: null })
   const [dialog, setDialog] = useState(null)
   const [notice, setNotice] = useState(null)
+  const [navigationTarget, setNavigationTarget] = useState(null)
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState('')
   const requestKey = String(requestVersion)
   const refresh = useCallback(() => setRequestVersion(version => version + 1), [])
   const closeDialog = useCallback(() => setDialog(null), [])
   const openOneOffDialog = useCallback(() => { setNotice(null); setDialog({ type: 'add-one-off' }) }, [])
   const openWeeklyDialog = useCallback(() => { setNotice(null); setDialog({ type: 'add-weekly' }) }, [])
+  const openTimeOffDialog = useCallback((date = '') => {
+    const validDate = date && date >= todayInIndia() ? date : ''
+    const blocks = validDate
+      ? (state.availability?.items ?? []).filter(block => isoToIndiaDate(block.startAt) === validDate)
+      : []
+    setNotice(null)
+    setDialog({ type: 'add-time-off', initialValues: timeOffDefaults(validDate, blocks) })
+  }, [state.availability])
 
   useEffect(() => {
     const controller = new AbortController()
     const currentKey = requestKey
-    Promise.all([
+    Promise.allSettled([
       listDoctorAvailability(controller.signal),
       listDoctorRecurringAvailability(controller.signal),
+      getAvailabilityExceptions(controller.signal),
     ])
-      .then(([availability, rules]) => setState({ key: currentKey, availability, rules, error: null }))
-      .catch(error => {
-        if (error.name !== 'AbortError') setState({ key: currentKey, availability: null, rules: null, error })
+      .then(([availabilityResult, rulesResult, exceptionsResult]) => {
+        if (controller.signal.aborted) return
+        const primaryError = availabilityResult.status === 'rejected'
+          ? availabilityResult.reason
+          : rulesResult.status === 'rejected' ? rulesResult.reason : null
+        setState(previous => {
+          const availability = availabilityResult.status === 'fulfilled'
+            ? availabilityResult.value
+            : previous.availability
+          const rules = rulesResult.status === 'fulfilled'
+            ? rulesResult.value
+            : previous.rules
+          const hasPrimaryData = Boolean(availability && rules)
+
+          return {
+            key: currentKey,
+            availability,
+            rules,
+            exceptions: exceptionsResult.status === 'fulfilled'
+              ? exceptionsResult.value
+              : previous.exceptions,
+            exceptionsError: exceptionsResult.status === 'rejected' ? exceptionsResult.reason : null,
+            refreshError: primaryError && hasPrimaryData ? primaryError : null,
+            error: primaryError && !hasPrimaryData ? primaryError : null,
+          }
+        })
       })
     return () => controller.abort()
   }, [requestKey])
@@ -887,8 +1292,15 @@ export function DoctorAvailabilityPage() {
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([date, blocks]) => [date, blocks.sort((left, right) => new Date(left.startAt) - new Date(right.startAt))])
   }, [state.availability])
-  const activeRules = useMemo(() => (state.rules?.items ?? []).filter(rule => rule.status === 'active'), [state.rules])
-  const stoppedRules = useMemo(() => (state.rules?.items ?? []).filter(rule => rule.status === 'stopped'), [state.rules])
+  const today = todayInIndia()
+  const recurringRules = useMemo(() => (state.rules?.items ?? []).map(rule => ({
+    rule,
+    status: recurringRuleDisplayStatus(rule, today),
+  })), [state.rules, today])
+  const activeRules = useMemo(() => recurringRules.filter(item => item.status === 'active'), [recurringRules])
+  const previousRules = useMemo(() => recurringRules.filter(item => item.status !== 'active'), [recurringRules])
+  const exceptions = useMemo(() => [...(state.exceptions?.exceptions ?? [])].sort((left, right) => left.date.localeCompare(right.date) || (left.startTime ?? '').localeCompare(right.startTime ?? '')), [state.exceptions])
+  const timeOffEntries = useMemo(() => logicalTimeOffEntries(exceptions), [exceptions])
   const loading = state.key !== requestKey
 
   function oneOffCreated() { setDialog(null); setNotice({ type: 'success', message: 'One-off availability added.' }); refresh() }
@@ -896,6 +1308,18 @@ export function DoctorAvailabilityPage() {
   function stopped() { setDialog(null); setNotice({ type: 'success', message: 'Weekly schedule stopped.' }); refresh() }
   function deleted() { setDialog(null); setNotice({ type: 'success', message: 'Availability removed.' }); refresh() }
   function protectedDelete(message) { setDialog(null); setNotice({ type: 'error', message }); refresh() }
+  function timeOffCreated(date, message = 'Time off added.') {
+    setDialog(null)
+    setNotice({ type: 'success', message })
+    setNavigationTarget({ date, key: Date.now() })
+    refresh()
+  }
+  function timeOffRemoved(date) {
+    setDialog(null)
+    setNotice({ type: 'success', message: 'Time off removed.' })
+    setNavigationTarget({ date, key: Date.now() })
+    refresh()
+  }
 
   return (
     <div className="doctor-availability-page min-h-screen">
@@ -907,30 +1331,52 @@ export function DoctorAvailabilityPage() {
         {notice && <p className="doctor-availability__notice" data-type={notice.type} role={notice.type === 'error' ? 'alert' : 'status'}>{notice.message}</p>}
         {loading && <div className="doctor-availability__loading animate-pulse" aria-label="Loading availability"><div /><div /></div>}
         {!loading && state.error && <div className="doctor-availability__error"><h2>We couldn’t load your availability</h2><p>{friendlyError(state.error, 'Please try again.')}</p><button onClick={refresh} type="button">Try again</button></div>}
+        {!loading && state.refreshError && <div className="doctor-availability__refresh-warning" role="alert"><p>Availability couldn’t be refreshed. Showing your last loaded schedule.</p><button onClick={refresh} type="button">Try again</button></div>}
         {!loading && !state.error && <div className="availability-workspace">
           <section className="availability-section availability-section--regular" aria-labelledby="regular-schedule-heading">
             <div className="availability-section__heading">
               <div><p>Schedule settings</p><h2 id="regular-schedule-heading">Regular schedule</h2><span>Your usual weekly consultation hours.</span></div>
             </div>
             {activeRules.length > 0
-              ? <div className="availability-rules">{activeRules.map(rule => <RecurringRule key={rule.id} onStop={selected => { setNotice(null); setDialog({ type: 'stop-weekly', rule: selected }) }} rule={rule} />)}</div>
+              ? <div className="availability-rules">{activeRules.map(({ rule, status }) => <RecurringRule key={rule.id} onStop={selected => { setNotice(null); setDialog({ type: 'stop-weekly', rule: selected }) }} rule={rule} status={status} />)}</div>
               : <div className="availability-section__empty"><p>No regular schedule yet.</p><span>Add the days and times you usually consult.</span></div>}
-            {stoppedRules.length > 0 && <PreviousSchedules rules={stoppedRules} />}
+            {previousRules.length > 0 && <PreviousSchedules rules={previousRules} />}
             <div className="availability-management-actions">
               <button className="availability-button availability-button--primary" onClick={openWeeklyDialog} type="button"><span aria-hidden="true">+</span> Add weekly schedule</button>
               <button className="availability-button availability-button--secondary" onClick={openOneOffDialog} type="button"><span aria-hidden="true">+</span> Add one-off time</button>
             </div>
+            <div className="availability-time-off-settings" aria-labelledby="time-off-heading">
+              <div><h3 id="time-off-heading">Time off</h3><p>Block a date or part of a day without changing your regular schedule.</p></div>
+              {state.exceptionsError
+                ? <div className="availability-time-off-error" role="alert"><p>{state.exceptions ? 'Time off couldn’t be refreshed. Showing the last loaded entries.' : 'Time off couldn’t be loaded.'}</p><button onClick={refresh} type="button">Try again</button></div>
+                : timeOffEntries.length > 0
+                  ? <TimeOffSummary entries={timeOffEntries} onRemove={exception => { setNotice(null); setDialog({ type: 'remove-time-off', exception }) }} />
+                  : <p className="availability-time-off-empty">No time off scheduled.</p>}
+              <button className="availability-button availability-button--secondary" disabled={Boolean(state.exceptionsError)} onClick={() => openTimeOffDialog(selectedCalendarDate)} type="button"><span aria-hidden="true">+</span> Add time off</button>
+            </div>
           </section>
 
           <section className="availability-section availability-section--upcoming" aria-labelledby="availability-calendar-heading">
-            <AvailabilityCalendar groups={grouped} onDelete={selected => { setNotice(null); setDialog({ type: 'delete', block: selected }) }} />
+            <AvailabilityCalendar
+              exceptions={exceptions}
+              exceptionsError={state.exceptionsError}
+              groups={grouped}
+              key={navigationTarget?.key ?? 'availability-calendar'}
+              navigationTarget={navigationTarget}
+              onAddTimeOff={openTimeOffDialog}
+              onDelete={selected => { setNotice(null); setDialog({ type: 'delete', block: selected }) }}
+              onRemoveTimeOff={exception => { setNotice(null); setDialog({ type: 'remove-time-off', exception }) }}
+              onSelectedDateChange={setSelectedCalendarDate}
+            />
           </section>
         </div>}
       </main>
       <PublicFooter />
       {dialog?.type === 'add-one-off' && <AvailabilityDialog onClose={closeDialog} onCreated={oneOffCreated} />}
+      {dialog?.type === 'add-time-off' && <TimeOffDialog initialValues={dialog.initialValues} onClose={closeDialog} onCreated={timeOffCreated} />}
       {dialog?.type === 'add-weekly' && <WeeklyScheduleDialog onClose={closeDialog} onCreated={weeklyCreated} />}
       {dialog?.type === 'delete' && <DeleteDialog block={dialog.block} onClose={closeDialog} onDeleted={deleted} onProtected={protectedDelete} />}
+      {dialog?.type === 'remove-time-off' && <RemoveTimeOffDialog exception={dialog.exception} onClose={closeDialog} onRemoved={timeOffRemoved} />}
       {dialog?.type === 'stop-weekly' && <StopScheduleDialog onClose={closeDialog} onStopped={stopped} rule={dialog.rule} />}
     </div>
   )
