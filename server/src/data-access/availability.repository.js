@@ -1,4 +1,18 @@
+import { randomUUID } from 'node:crypto'
 import { getPool } from '../db/pool.js'
+import { activeAvailabilityExceptionExistsSql } from './availability-exception-predicate.js'
+
+const requestedRangeExceptionSql = activeAvailabilityExceptionExistsSql({
+  doctorId: '$1',
+  startAt: '$2',
+  endAt: '$3',
+})
+
+const listedSlotExceptionSql = activeAvailabilityExceptionExistsSql({
+  doctorId: 'block.doctor_id',
+  startAt: 'slot.start_at',
+  endAt: 'slot.end_at',
+})
 
 export class AvailabilityDataError extends Error {
   constructor(code, details = null) {
@@ -238,6 +252,17 @@ async function assertNoSlotOverlap(client, doctorId, occurrence, excludeRuleId =
   if (result.rowCount > 0) throw new AvailabilityDataError('AVAILABILITY_OVERLAP')
 }
 
+async function assertNoActiveExceptionConflict(client, doctorId, occurrence) {
+  const result = await client.query(
+    `SELECT ${requestedRangeExceptionSql} AS has_exception`,
+    [doctorId, occurrence.startAt, occurrence.endAt],
+  )
+
+  if (result.rows[0].has_exception) {
+    throw new AvailabilityDataError('AVAILABILITY_EXCEPTION_CONFLICT')
+  }
+}
+
 function recurringRuleFromRow(row) {
   return {
     id: Number(row.id),
@@ -258,6 +283,7 @@ function recurringRuleFromRow(row) {
 }
 
 function exceptionFromRow(row) {
+  const rangeId = row.exception_group_id ?? null
   return {
     id: Number(row.id),
     doctorId: Number(row.doctor_id),
@@ -265,6 +291,9 @@ function exceptionFromRow(row) {
     allDay: row.all_day,
     startTime: row.start_time === null ? null : clockTime(row.start_time),
     endTime: row.end_time === null ? null : clockTime(row.end_time),
+    rangeId,
+    rangeStartDate: rangeId === null ? null : calendarDate(row.range_start_date),
+    rangeEndDate: rangeId === null ? null : calendarDate(row.range_end_date),
     createdAt: new Date(row.created_at).toISOString(),
   }
 }
@@ -362,6 +391,67 @@ async function assertNoBookedExceptionConflict(client, exception) {
   }
 }
 
+function exceptionRangeInput(input) {
+  return {
+    doctorId: input.doctorId,
+    startDate: calendarDate(input.startDate),
+    endDate: calendarDate(input.endDate),
+  }
+}
+
+function exceptionRangeDayCount(range) {
+  const start = new Date(`${range.startDate}T00:00:00.000Z`)
+  const end = new Date(`${range.endDate}T00:00:00.000Z`)
+  return Math.floor((end - start) / 86400000) + 1
+}
+
+function assertExceptionRange(range, now) {
+  const dayCount = exceptionRangeDayCount(range)
+  if (dayCount < 2 || dayCount > 31) {
+    throw new AvailabilityDataError('AVAILABILITY_EXCEPTION_RANGE_INVALID')
+  }
+  if (range.startDate < indiaDate(now)) {
+    throw new AvailabilityDataError('AVAILABILITY_EXCEPTION_IN_PAST')
+  }
+}
+
+async function assertNoActiveExceptionRangeOverlap(client, range) {
+  const result = await client.query(
+    `SELECT 1
+     FROM availability_exceptions existing_exception
+     WHERE existing_exception.doctor_id = $1
+       AND existing_exception.exception_date BETWEEN $2::date AND $3::date
+       AND existing_exception.removed_at IS NULL
+     LIMIT 1`,
+    [range.doctorId, range.startDate, range.endDate],
+  )
+
+  if (result.rowCount > 0) {
+    throw new AvailabilityDataError('AVAILABILITY_EXCEPTION_OVERLAP')
+  }
+}
+
+async function assertNoBookedExceptionRangeConflict(client, range) {
+  const result = await client.query(
+    `SELECT COUNT(*)::int AS conflict_count
+     FROM appointments appointment
+     JOIN slots slot ON slot.id = appointment.slot_id
+     JOIN availability_blocks block ON block.id = slot.availability_block_id
+     WHERE block.doctor_id = $1
+       AND appointment.status = 'booked'
+       AND (slot.start_at AT TIME ZONE 'Asia/Kolkata')::date
+         BETWEEN $2::date AND $3::date`,
+    [range.doctorId, range.startDate, range.endDate],
+  )
+  const conflictCount = Number(result.rows[0].conflict_count)
+
+  if (conflictCount > 0) {
+    throw new AvailabilityDataError('AVAILABILITY_EXCEPTION_BOOKED_CONFLICT', {
+      conflictCount,
+    })
+  }
+}
+
 async function materializeRule(client, rule, now) {
   const { materializedThrough, occurrences } = occurrencesForRule(rule, now)
   await assertNoActiveRuleOverlap(client, rule, rule.id)
@@ -442,6 +532,7 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
              WHERE appointment.slot_id = slot.id
                AND appointment.status = 'booked'
            ) AS slot_is_booked,
+           ${listedSlotExceptionSql} AS slot_is_exception_blocked,
            EXISTS (
              SELECT 1
              FROM appointments appointment_history
@@ -536,7 +627,17 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
       let result
       try {
         result = await client.query(
-          `SELECT
+          `WITH active_group_bounds AS (
+             SELECT doctor_id, exception_group_id,
+               MIN(exception_date) AS range_start_date,
+               MAX(exception_date) AS range_end_date
+             FROM availability_exceptions
+             WHERE doctor_id = $1
+               AND exception_group_id IS NOT NULL
+               AND removed_at IS NULL
+             GROUP BY doctor_id, exception_group_id
+           )
+           SELECT
              u.is_enabled,
              verification.status AS verification_status,
              availability_exception.id AS exception_id,
@@ -545,6 +646,9 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
              availability_exception.all_day,
              availability_exception.start_time,
              availability_exception.end_time,
+             availability_exception.exception_group_id,
+             active_group_bounds.range_start_date,
+             active_group_bounds.range_end_date,
              availability_exception.created_at
            FROM users u
            JOIN doctor_profiles profile ON profile.user_id = u.id
@@ -554,6 +658,9 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
             AND availability_exception.removed_at IS NULL
             AND availability_exception.exception_date >=
               ($2::timestamptz AT TIME ZONE 'Asia/Kolkata')::date
+           LEFT JOIN active_group_bounds
+             ON active_group_bounds.doctor_id = availability_exception.doctor_id
+            AND active_group_bounds.exception_group_id = availability_exception.exception_group_id
            WHERE u.id = $1
              AND u.role = 'doctor'
            ORDER BY availability_exception.exception_date,
@@ -614,6 +721,8 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
     async create({ doctorId, startAt, endAt, fee }) {
       return withTransaction(databaseProvider, async client => {
         await lockDoctorForAvailability(client, doctorId)
+
+        await assertNoActiveExceptionConflict(client, doctorId, { startAt, endAt })
 
         const localStart = indiaDateTime(startAt)
         const localEnd = indiaDateTime(endAt)
@@ -685,6 +794,48 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
             'availability_exceptions_active_all_day_unique',
             'availability_exceptions_active_partial_unique',
           ].includes(error.constraint)
+        ) {
+          throw new AvailabilityDataError('AVAILABILITY_EXCEPTION_OVERLAP')
+        }
+        throw error
+      }
+    },
+
+    async createExceptionRange(input, now = new Date()) {
+      const range = exceptionRangeInput(input)
+      try {
+        return await withTransaction(databaseProvider, async client => {
+          await lockDoctorForAvailability(client, range.doctorId)
+          assertExceptionRange(range, now)
+          await assertNoActiveExceptionRangeOverlap(client, range)
+          await assertNoBookedExceptionRangeConflict(client, range)
+
+          const rangeId = randomUUID()
+          await client.query(
+            `INSERT INTO availability_exceptions (
+               doctor_id, exception_date, all_day, start_time, end_time,
+               exception_group_id
+             )
+             SELECT $1, exception_date::date, TRUE, NULL, NULL, $4::uuid
+             FROM generate_series(
+               $2::date,
+               $3::date,
+               interval '1 day'
+             ) AS exception_date`,
+            [range.doctorId, range.startDate, range.endDate, rangeId],
+          )
+
+          return {
+            rangeId,
+            startDate: range.startDate,
+            endDate: range.endDate,
+            allDay: true,
+          }
+        })
+      } catch (error) {
+        if (
+          error?.code === '23505'
+          && error.constraint === 'availability_exceptions_active_all_day_unique'
         ) {
           throw new AvailabilityDataError('AVAILABILITY_EXCEPTION_OVERLAP')
         }
@@ -904,6 +1055,7 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
 
         const ownedResult = await client.query(
           `SELECT id, doctor_id, exception_date, all_day, start_time, end_time,
+             exception_group_id,
              created_at, removed_at
            FROM availability_exceptions
            WHERE id = $1
@@ -914,6 +1066,10 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
         const owned = ownedResult.rows[0]
         if (!owned) {
           throw new AvailabilityDataError('AVAILABILITY_EXCEPTION_NOT_FOUND')
+        }
+
+        if (owned.exception_group_id !== null) {
+          throw new AvailabilityDataError('AVAILABILITY_EXCEPTION_RANGE_REQUIRED')
         }
 
         if (owned.removed_at !== null) {
@@ -932,6 +1088,37 @@ export function createAvailabilityRepository(databaseProvider = getPool) {
         )
 
         return { exception: exceptionFromRow(result.rows[0]), removed: true }
+      })
+    },
+
+    async removeExceptionRange({ doctorId, rangeId }, now = new Date()) {
+      return withTransaction(databaseProvider, async client => {
+        await lockDoctorForAvailability(client, doctorId)
+
+        const ownedResult = await client.query(
+          `SELECT id
+           FROM availability_exceptions
+           WHERE doctor_id = $1
+             AND exception_group_id = $2::uuid
+           ORDER BY id
+           FOR UPDATE`,
+          [doctorId, rangeId],
+        )
+        if (ownedResult.rowCount === 0) {
+          throw new AvailabilityDataError('AVAILABILITY_EXCEPTION_NOT_FOUND')
+        }
+
+        const result = await client.query(
+          `UPDATE availability_exceptions
+           SET removed_at = $3
+           WHERE doctor_id = $1
+             AND exception_group_id = $2::uuid
+             AND removed_at IS NULL
+           RETURNING id`,
+          [doctorId, rangeId, now],
+        )
+
+        return { removed: result.rowCount > 0 }
       })
     },
   }

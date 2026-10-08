@@ -1,4 +1,26 @@
 import { getPool } from '../db/pool.js'
+import { activeAvailabilityExceptionExistsSql } from './availability-exception-predicate.js'
+
+const dateSearchExceptionSql = activeAvailabilityExceptionExistsSql({
+  doctorId: 'ab_date.doctor_id',
+  startAt: 's_date.start_at',
+  endAt: 's_date.end_at',
+  exceptionAlias: 'date_exception',
+})
+
+const nextAvailabilityExceptionSql = activeAvailabilityExceptionExistsSql({
+  doctorId: 'ab.doctor_id',
+  startAt: 's.start_at',
+  endAt: 's.end_at',
+  exceptionAlias: 'next_exception',
+})
+
+const slotListingExceptionSql = activeAvailabilityExceptionExistsSql({
+  doctorId: 'ab.doctor_id',
+  startAt: 's.start_at',
+  endAt: 's.end_at',
+  exceptionAlias: 'slot_exception',
+})
 
 const publicDoctorRule = `
   u.role = 'doctor'
@@ -134,6 +156,7 @@ function buildSearchConditions(filters) {
             WHERE a_date.slot_id = s_date.id
               AND a_date.status = 'booked'
           )
+          AND NOT ${dateSearchExceptionSql}
           AND (s_date.start_at AT TIME ZONE 'Asia/Kolkata')::date = ${placeholder}::date
       )
     `)
@@ -189,96 +212,102 @@ const publicDoctorSelect = `
           WHERE a_next.slot_id = s.id
             AND a_next.status = 'booked'
         )
+        AND NOT ${nextAvailabilityExceptionSql}
     ) AS next_available_at
   FROM users u
   JOIN doctor_profiles dp ON dp.user_id = u.id
   JOIN doctor_verifications dv ON dv.doctor_id = u.id
 `
 
-export const publicDoctorRepository = {
-  async findSearchVocabulary() {
-    const result = await getPool().query(
-      `SELECT
-         sp.id AS specialization_id,
-         sp.name,
-         COALESCE(
-           array_agg(sst.term ORDER BY sst.term) FILTER (WHERE sst.term IS NOT NULL),
-           ARRAY[]::varchar[]
-         ) AS terms
-       FROM specializations sp
-       LEFT JOIN specialization_search_terms sst ON sst.specialization_id = sp.id
-       GROUP BY sp.id, sp.name
-       ORDER BY sp.name`,
-    )
+export function createPublicDoctorRepository(databaseProvider = getPool) {
+  return {
+    async findSearchVocabulary() {
+      const result = await databaseProvider().query(
+        `SELECT
+           sp.id AS specialization_id,
+           sp.name,
+           COALESCE(
+             array_agg(sst.term ORDER BY sst.term) FILTER (WHERE sst.term IS NOT NULL),
+             ARRAY[]::varchar[]
+           ) AS terms
+         FROM specializations sp
+         LEFT JOIN specialization_search_terms sst ON sst.specialization_id = sp.id
+         GROUP BY sp.id, sp.name
+         ORDER BY sp.name`,
+      )
 
-    return result.rows
-  },
+      return result.rows
+    },
 
-  async search(filters) {
-    const database = getPool()
-    const { whereSql, values, searchRankSql } = buildSearchConditions(filters)
+    async search(filters) {
+      const database = databaseProvider()
+      const { whereSql, values, searchRankSql } = buildSearchConditions(filters)
 
-    const totalResult = await database.query(
-      `SELECT COUNT(*) AS total
-       FROM users u
-       JOIN doctor_profiles dp ON dp.user_id = u.id
-       JOIN doctor_verifications dv ON dv.doctor_id = u.id
-       WHERE ${whereSql}`,
-      values,
-    )
+      const totalResult = await database.query(
+        `SELECT COUNT(*) AS total
+         FROM users u
+         JOIN doctor_profiles dp ON dp.user_id = u.id
+         JOIN doctor_verifications dv ON dv.doctor_id = u.id
+         WHERE ${whereSql}`,
+        values,
+      )
 
-    const limitPlaceholder = `$${values.length + 1}`
-    const offsetPlaceholder = `$${values.length + 2}`
-    const result = await database.query(
-      `${publicDoctorSelect}
-       WHERE ${whereSql}
-       ORDER BY ${searchRankSql ? `${searchRankSql}, ` : ''}next_available_at ASC NULLS LAST, u.full_name ASC, u.id ASC
-       LIMIT ${limitPlaceholder}
-       OFFSET ${offsetPlaceholder}`,
-      [...values, filters.limit, filters.offset],
-    )
+      const limitPlaceholder = `$${values.length + 1}`
+      const offsetPlaceholder = `$${values.length + 2}`
+      const result = await database.query(
+        `${publicDoctorSelect}
+         WHERE ${whereSql}
+         ORDER BY ${searchRankSql ? `${searchRankSql}, ` : ''}next_available_at ASC NULLS LAST, u.full_name ASC, u.id ASC
+         LIMIT ${limitPlaceholder}
+         OFFSET ${offsetPlaceholder}`,
+        [...values, filters.limit, filters.offset],
+      )
 
-    return {
-      rows: result.rows,
-      total: Number(totalResult.rows[0].total),
-    }
-  },
+      return {
+        rows: result.rows,
+        total: Number(totalResult.rows[0].total),
+      }
+    },
 
-  async findById(doctorId) {
-    const result = await getPool().query(
-      `${publicDoctorSelect}
-       WHERE ${publicDoctorRule}
-         AND u.id = $1`,
-      [doctorId],
-    )
+    async findById(doctorId) {
+      const result = await databaseProvider().query(
+        `${publicDoctorSelect}
+         WHERE ${publicDoctorRule}
+           AND u.id = $1`,
+        [doctorId],
+      )
 
-    return result.rows[0] ?? null
-  },
+      return result.rows[0] ?? null
+    },
 
-  async findSlotsByDate(doctorId, date) {
-    const result = await getPool().query(
-      `SELECT
-         s.id,
-         s.start_at,
-         s.end_at,
-         COALESCE(ab.effective_fee, dp.default_fee) AS fee
-       FROM availability_blocks ab
-       JOIN doctor_profiles dp ON dp.user_id = ab.doctor_id
-       JOIN slots s ON s.availability_block_id = ab.id
-       WHERE ab.doctor_id = $1
-         AND s.is_active = TRUE
-         AND s.start_at > current_timestamp
-         AND NOT EXISTS (
-           SELECT 1
-           FROM appointments a
-           WHERE a.slot_id = s.id
-             AND a.status = 'booked'
-         )
-         AND (s.start_at AT TIME ZONE 'Asia/Kolkata')::date = $2::date
-       ORDER BY s.start_at ASC`,
-      [doctorId, date],
-    )
+    async findSlotsByDate(doctorId, date) {
+      const result = await databaseProvider().query(
+        `SELECT
+           s.id,
+           s.start_at,
+           s.end_at,
+           COALESCE(ab.effective_fee, dp.default_fee) AS fee
+         FROM availability_blocks ab
+         JOIN doctor_profiles dp ON dp.user_id = ab.doctor_id
+         JOIN slots s ON s.availability_block_id = ab.id
+         WHERE ab.doctor_id = $1
+           AND s.is_active = TRUE
+           AND s.start_at > current_timestamp
+           AND NOT EXISTS (
+             SELECT 1
+             FROM appointments a
+             WHERE a.slot_id = s.id
+               AND a.status = 'booked'
+           )
+           AND NOT ${slotListingExceptionSql}
+           AND (s.start_at AT TIME ZONE 'Asia/Kolkata')::date = $2::date
+         ORDER BY s.start_at ASC`,
+        [doctorId, date],
+      )
 
-    return result.rows
-  },
+      return result.rows
+    },
+  }
 }
+
+export const publicDoctorRepository = createPublicDoctorRepository()

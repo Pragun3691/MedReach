@@ -76,6 +76,8 @@ describe('appointment repository transactions', () => {
     expect(advisoryLock).toBeGreaterThan(calls.findIndex(call => call.sql.startsWith('SELECT ab.doctor_id')))
     expect(advisoryLock).toBeLessThan(slotRowLock)
     expect(slotRowLock).toBeLessThan(appointmentInsert)
+    expect(calls[slotRowLock].sql).toContain('availability_exception.removed_at IS NULL')
+    expect(calls[slotRowLock].sql).toContain("s.start_at AT TIME ZONE 'Asia/Kolkata'")
     expect(statements.filter(sql => sql.includes('INSERT INTO notifications'))).toHaveLength(2)
     expect(statements.at(-1)).toBe('COMMIT')
     expect(client.release).toHaveBeenCalledOnce()
@@ -102,6 +104,26 @@ describe('appointment repository transactions', () => {
     expect(statements).toContain('ROLLBACK')
     expect(statements).not.toContain('COMMIT')
     expect(client.release).toHaveBeenCalledOnce()
+  })
+
+  it('rejects an exception-covered slot as the existing SLOT_UNAVAILABLE contract', async () => {
+    const statements = []
+    const { database } = databaseWith(vi.fn(async sql => {
+      statements.push(sql)
+      if (sql === 'BEGIN' || sql === 'ROLLBACK') return { rows: [] }
+      if (sql.includes('SELECT ab.doctor_id')) return { rows: [{ doctor_id: 10 }] }
+      if (sql.includes('pg_advisory_xact_lock_shared')) return { rows: [{}] }
+      if (sql.includes('FROM slots s')) {
+        return { rows: [{ ...validSlot, is_exception_blocked: true }] }
+      }
+      throw new Error(`Unexpected SQL: ${sql}`)
+    }))
+    const repository = createAppointmentRepository(() => database)
+
+    await expect(repository.book({ patientId: 1, patientName: 'Ananya Rao', slotId: 101 }))
+      .rejects.toMatchObject({ code: 'SLOT_UNAVAILABLE' })
+    expect(statements.some(sql => sql.includes('INSERT INTO appointments'))).toBe(false)
+    expect(statements.at(-1)).toBe('ROLLBACK')
   })
 
   it('rolls back a reschedule before changing the old appointment when the new slot fails validation', async () => {
@@ -184,6 +206,40 @@ describe('appointment repository transactions', () => {
     expect(advisoryLocks.map(call => call.parameters)).toEqual([[10], [20]])
     expect(calls.indexOf(advisoryLocks[0])).toBeLessThan(firstRowLock)
     expect(calls.indexOf(advisoryLocks[1])).toBeLessThan(firstRowLock)
+  })
+
+  it('leaves the original appointment unchanged when the target is exception-covered', async () => {
+    const statements = []
+    const lockedAppointment = {
+      ...appointmentRow,
+      is_future: true,
+    }
+    const { database } = databaseWith(vi.fn(async sql => {
+      statements.push(sql)
+      if (sql === 'BEGIN' || sql === 'ROLLBACK') return { rows: [] }
+      if (sql.includes('SELECT a.patient_id, ab.doctor_id')) {
+        return { rows: [{ patient_id: 1, doctor_id: 10 }] }
+      }
+      if (sql.includes('SELECT ab.doctor_id') && !sql.includes('FOR UPDATE')) {
+        return { rows: [{ doctor_id: 10 }] }
+      }
+      if (sql.includes('pg_advisory_xact_lock_shared')) return { rows: [{}] }
+      if (sql.includes('FROM appointments a') && sql.includes('FOR UPDATE OF a')) {
+        return { rows: [lockedAppointment] }
+      }
+      if (sql.includes('FROM consultations')) return { rows: [] }
+      if (sql.includes('FROM slots s')) {
+        return { rows: [{ ...validSlot, id: 102, is_exception_blocked: true }] }
+      }
+      throw new Error(`Unexpected SQL: ${sql}`)
+    }))
+    const repository = createAppointmentRepository(() => database)
+
+    await expect(repository.reschedule({ appointmentId: 1000, patientId: 1, slotId: 102 }))
+      .rejects.toMatchObject({ code: 'SLOT_UNAVAILABLE' })
+    expect(statements.some(sql => sql.includes("SET status = 'rescheduled'"))).toBe(false)
+    expect(statements.some(sql => sql.includes('INSERT INTO appointments'))).toBe(false)
+    expect(statements.at(-1)).toBe('ROLLBACK')
   })
 
   it('allows an assigned Doctor to cancel an unresolved booking after the slot ends', async () => {

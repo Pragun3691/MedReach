@@ -49,6 +49,7 @@ function createTestContext() {
         startAt: slotStart,
         endAt: new Date(slotStart.getTime() + 30 * 60 * 1000),
         isActive: input.isActive ?? true,
+        isExceptionBlocked: input.isExceptionBlocked ?? false,
       }
       slots.push(slot)
       return slot
@@ -86,6 +87,7 @@ function createTestContext() {
             slot_start_at: slot?.startAt ?? null,
             slot_end_at: slot?.endAt ?? null,
             slot_is_active: slot?.isActive ?? null,
+            slot_is_exception_blocked: slot?.isExceptionBlocked ?? false,
             slot_is_booked: slot
               ? appointments.some(item => item.slotId === slot.id && item.status === 'booked')
               : false,
@@ -557,6 +559,30 @@ describe('Doctor own availability API', () => {
       isActive: true,
       isBooked: false,
       hasAppointmentHistory: false,
+      isExceptionBlocked: false,
+      isBookable: true,
+    })
+  })
+
+  it('preserves raw slot activity while exposing exception-blocked effective bookability', async () => {
+    context.addBlock({
+      doctorId: 10,
+      startAt: '2026-09-20T03:30:00.000Z',
+      endAt: '2026-09-20T04:00:00.000Z',
+      slotStarts: [{
+        startAt: '2026-09-20T03:30:00.000Z',
+        isActive: true,
+        isExceptionBlocked: true,
+      }],
+    })
+    const doctor = await login(context.app, 'approved@example.test')
+    const response = await doctor.get('/api/doctors/me/availability')
+
+    expect(response.body.items[0].slots[0]).toMatchObject({
+      isActive: true,
+      isBooked: false,
+      isExceptionBlocked: true,
+      isBookable: false,
     })
   })
 
@@ -572,7 +598,12 @@ describe('Doctor own availability API', () => {
     const response = await doctor.get('/api/doctors/me/availability')
 
     expect(response.body.items[0]).toMatchObject({ isProtected: true, canDelete: false })
-    expect(response.body.items[0].slots[0]).toMatchObject({ isBooked: true, hasAppointmentHistory: true })
+    expect(response.body.items[0].slots[0]).toMatchObject({
+      isBooked: true,
+      hasAppointmentHistory: true,
+      isExceptionBlocked: false,
+      isBookable: false,
+    })
   })
 
   it.each(['cancelled', 'rescheduled', 'completed'])('protects a block with %s appointment history', async status => {
@@ -587,7 +618,11 @@ describe('Doctor own availability API', () => {
     const response = await doctor.get('/api/doctors/me/availability')
 
     expect(response.body.items[0]).toMatchObject({ isProtected: true, canDelete: false })
-    expect(response.body.items[0].slots[0]).toMatchObject({ isBooked: false, hasAppointmentHistory: true })
+    expect(response.body.items[0].slots[0]).toMatchObject({
+      isBooked: false,
+      hasAppointmentHistory: true,
+      isBookable: true,
+    })
   })
 
   it('returns current availability, excludes ended blocks, and does not mark a current block deletable', async () => {
@@ -595,6 +630,7 @@ describe('Doctor own availability API', () => {
       doctorId: 10,
       startAt: '2026-09-14T23:30:00.000Z',
       endAt: '2026-09-15T00:30:00.000Z',
+      slotStarts: ['2026-09-14T23:30:00.000Z'],
     })
     context.addBlock({
       doctorId: 10,
@@ -607,6 +643,7 @@ describe('Doctor own availability API', () => {
     expect(response.body.items).toEqual([
       expect.objectContaining({ id: current.block.id, canDelete: false }),
     ])
+    expect(response.body.items[0].slots[0].isBookable).toBe(false)
   })
 
   it('rejects a non-Doctor through the existing role authorization', async () => {

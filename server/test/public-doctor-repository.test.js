@@ -90,9 +90,12 @@ describe('public doctor search repository', () => {
     expect(countSql).toContain("dv.status = 'approved'")
     expect(countSql.match(/specialization_id = ANY/g)).toHaveLength(2)
     expect(countSql).toContain('s_date.start_at')
+    expect(countSql).toContain('date_exception.removed_at IS NULL')
+    expect(countSql).toContain("s_date.start_at AT TIME ZONE 'Asia/Kolkata'")
     expect(countSql).toContain('dp.default_fee <=')
     expect(countSql).toContain('dp.experience_years >=')
     expect(resultSql).toContain('ORDER BY next_available_at ASC NULLS LAST, u.full_name ASC, u.id ASC')
+    expect(resultSql).toContain('next_exception.removed_at IS NULL')
     expect(resultValues.slice(-2)).toEqual([5, 10])
     expect(result).toEqual({ rows: [{ id: '10' }], total: 1 })
   })
@@ -101,5 +104,17 @@ describe('public doctor search repository', () => {
     database.query.mockResolvedValueOnce({ rows: [{ total: '0' }] }).mockResolvedValueOnce({ rows: [] })
     await publicDoctorRepository.search({ problem: 'unrelated', problemSpecializationIds: [], limit: 10, offset: 0 })
     expect(database.query.mock.calls[0][0]).toContain('(FALSE)')
+  })
+
+  it('applies the shared active-exception predicate to public profile slots', async () => {
+    database.query.mockResolvedValue({ rows: [] })
+
+    await publicDoctorRepository.findSlotsByDate(10, '2030-01-01')
+
+    const sql = database.query.mock.calls[0][0]
+    expect(sql).toContain('slot_exception.doctor_id = ab.doctor_id')
+    expect(sql).toContain('slot_exception.removed_at IS NULL')
+    expect(sql).toContain("s.start_at AT TIME ZONE 'Asia/Kolkata'")
+    expect(sql).toContain('slot_exception.all_day = TRUE')
   })
 })

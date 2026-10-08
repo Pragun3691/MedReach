@@ -1,4 +1,11 @@
 import { getPool } from '../db/pool.js'
+import { activeAvailabilityExceptionExistsSql } from './availability-exception-predicate.js'
+
+const slotExceptionSql = activeAvailabilityExceptionExistsSql({
+  doctorId: 'ab.doctor_id',
+  startAt: 's.start_at',
+  endAt: 's.end_at',
+})
 
 export class AppointmentDataError extends Error {
   constructor(code) {
@@ -151,7 +158,8 @@ async function lockSlot(client, slotId) {
          FROM appointments existing
          WHERE existing.slot_id = s.id
            AND existing.status = 'booked'
-       ) AS is_booked
+       ) AS is_booked,
+       ${slotExceptionSql} AS is_exception_blocked
      FROM slots s
      JOIN availability_blocks ab ON ab.id = s.availability_block_id
      JOIN doctor_profiles dp ON dp.user_id = ab.doctor_id
@@ -170,6 +178,7 @@ async function lockSlot(client, slotId) {
     || !slot.doctor_is_enabled
     || slot.verification_status !== 'approved'
     || slot.is_booked
+    || slot.is_exception_blocked
   ) {
     throw new AppointmentDataError('SLOT_UNAVAILABLE')
   }

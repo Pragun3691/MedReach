@@ -28,11 +28,47 @@ function calendarDateString(value) {
   return `${parts.year}-${parts.month}-${parts.day}`
 }
 
-function translateDataError(error) {
+function translateDataError(error, { exposeConflictCount = false } = {}) {
   if (!(error instanceof AvailabilityDataError)) throw error
 
   if (error.code === 'AVAILABILITY_OVERLAP') {
     throw new AppError(409, 'AVAILABILITY_OVERLAP', 'Availability overlaps existing availability')
+  }
+
+  if (error.code === 'AVAILABILITY_EXCEPTION_CONFLICT') {
+    throw new AppError(409, 'AVAILABILITY_EXCEPTION_CONFLICT', 'Availability overlaps an active exception')
+  }
+
+  if (error.code === 'AVAILABILITY_EXCEPTION_IN_PAST') {
+    throw new AppError(409, 'AVAILABILITY_EXCEPTION_IN_PAST', 'Availability exception is in the past')
+  }
+
+  if (error.code === 'AVAILABILITY_EXCEPTION_OVERLAP') {
+    throw new AppError(409, 'AVAILABILITY_EXCEPTION_OVERLAP', 'Availability exception overlaps an active exception')
+  }
+
+  if (error.code === 'AVAILABILITY_EXCEPTION_BOOKED_CONFLICT') {
+    const conflictCount = Number(error.details?.conflictCount)
+    throw new AppError(
+      409,
+      'AVAILABILITY_EXCEPTION_BOOKED_CONFLICT',
+      'Availability exception overlaps a booked appointment',
+      exposeConflictCount && Number.isInteger(conflictCount) && conflictCount > 0
+        ? { conflictCount }
+        : null,
+    )
+  }
+
+  if (error.code === 'AVAILABILITY_EXCEPTION_NOT_FOUND') {
+    throw new AppError(404, 'AVAILABILITY_EXCEPTION_NOT_FOUND', 'Availability exception not found')
+  }
+
+  if (error.code === 'AVAILABILITY_EXCEPTION_RANGE_REQUIRED') {
+    throw new AppError(409, 'AVAILABILITY_EXCEPTION_RANGE_REQUIRED', 'Remove this time off using its range identifier')
+  }
+
+  if (error.code === 'AVAILABILITY_EXCEPTION_RANGE_INVALID') {
+    throw new AppError(400, 'AVAILABILITY_EXCEPTION_RANGE_INVALID', 'Time off range must contain 2 to 31 calendar days')
   }
 
   if (error.code === 'DOCTOR_NOT_APPROVED') {
@@ -120,13 +156,21 @@ export function createAvailabilityService(repository = availabilityRepository, c
 
         if (row.slot_id !== null && row.slot_id !== undefined) {
           const hasAppointmentHistory = Boolean(row.slot_has_appointment_history)
+          const isActive = Boolean(row.slot_is_active)
+          const isBooked = Boolean(row.slot_is_booked)
+          const isExceptionBlocked = Boolean(row.slot_is_exception_blocked)
           block.slots.push({
             id: Number(row.slot_id),
             startAt: row.slot_start_at,
             endAt: row.slot_end_at,
-            isActive: Boolean(row.slot_is_active),
-            isBooked: Boolean(row.slot_is_booked),
+            isActive,
+            isBooked,
             hasAppointmentHistory,
+            isExceptionBlocked,
+            isBookable: isActive
+              && new Date(row.slot_start_at) > now
+              && !isBooked
+              && !isExceptionBlocked,
           })
           block.isProtected ||= hasAppointmentHistory
         }
@@ -202,6 +246,64 @@ export function createAvailabilityService(repository = availabilityRepository, c
         }, clock())
 
         return recurringRule(result.rule, result.materialized.length)
+      } catch (error) {
+        translateDataError(error)
+      }
+    },
+
+    async listExceptions(doctorId) {
+      try {
+        const exceptions = await repository.listExceptions({ doctorId }, clock())
+        return {
+          exceptions: exceptions.map(exception => ({
+            id: Number(exception.id),
+            date: exception.date,
+            allDay: exception.allDay,
+            startTime: exception.startTime,
+            endTime: exception.endTime,
+            rangeId: exception.rangeId,
+            rangeStartDate: exception.rangeStartDate,
+            rangeEndDate: exception.rangeEndDate,
+            createdAt: exception.createdAt,
+          })),
+        }
+      } catch (error) {
+        translateDataError(error)
+      }
+    },
+
+    async createException(doctorId, input) {
+      const isRange = 'startDate' in input
+      try {
+        if (isRange) {
+          return await repository.createExceptionRange({ ...input, doctorId }, clock())
+        }
+
+        const exception = await repository.createException({ ...input, doctorId }, clock())
+        return {
+          id: Number(exception.id),
+          date: exception.date,
+          allDay: exception.allDay,
+          startTime: exception.startTime,
+          endTime: exception.endTime,
+          createdAt: exception.createdAt,
+        }
+      } catch (error) {
+        translateDataError(error, { exposeConflictCount: isRange })
+      }
+    },
+
+    async removeException(doctorId, exceptionId) {
+      try {
+        await repository.removeException({ doctorId, exceptionId }, clock())
+      } catch (error) {
+        translateDataError(error)
+      }
+    },
+
+    async removeExceptionRange(doctorId, rangeId) {
+      try {
+        await repository.removeExceptionRange({ doctorId, rangeId }, clock())
       } catch (error) {
         translateDataError(error)
       }

@@ -26,6 +26,7 @@ export function errorHandler(error, _request, response, next) {
       error: {
         code: error.code,
         message: error.message,
+        ...(error.details === null ? {} : { details: error.details }),
       },
     })
     return

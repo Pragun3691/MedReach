@@ -9,16 +9,29 @@ import { up as upConsultationLifecycle } from '../migrations/1788775500000_creat
 import { up as upClinicalWorkspace } from '../migrations/1789375600000_add-consultation-clinical-workspace.js'
 import { up as upSearchAliases } from '../migrations/1790000000000_add_search_aliases.js'
 import { up as upRecurringAvailability } from '../migrations/1790100000000_add-recurring-availability-rules.js'
+import { up as upAvailabilityExceptions } from '../migrations/1790200000000_add-availability-exceptions.js'
+import { up as upAvailabilityExceptionGroups } from '../migrations/1790300000000_add-availability-exception-groups.js'
 import {
   AvailabilityDataError,
   createAvailabilityRepository,
 } from '../src/data-access/availability.repository.js'
 import { createAppointmentRepository } from '../src/data-access/appointment.repository.js'
+import { createPublicDoctorRepository } from '../src/data-access/public-doctor.repository.js'
 import { createRecurringAvailabilityExtenderService } from '../src/services/recurring-availability-extender.service.js'
 
 const { Pool } = pg
 const describeWithPostgres = process.env.DATABASE_URL ? describe : describe.skip
 const now = new Date('2026-09-17T00:00:00.000Z')
+const raceDateValue = new Date()
+raceDateValue.setUTCHours(0, 0, 0, 0)
+raceDateValue.setUTCDate(raceDateValue.getUTCDate() + 14)
+const raceDate = raceDateValue.toISOString().slice(0, 10)
+const raceWeekday = raceDateValue.getUTCDay() || 7
+const raceClock = new Date(raceDateValue)
+raceClock.setUTCDate(raceClock.getUTCDate() - 1)
+const raceOriginalDateValue = new Date(raceDateValue)
+raceOriginalDateValue.setUTCDate(raceOriginalDateValue.getUTCDate() + 1)
+const raceOriginalDate = raceOriginalDateValue.toISOString().slice(0, 10)
 
 function migrationSql(migration) {
   const pgm = new MigrationBuilder({
@@ -38,6 +51,7 @@ describeWithPostgres('recurring availability repository', () => {
   let schema
   let repository
   let appointmentRepository
+  let publicRepository
   let provider
   let reviewerId
   let doctorId
@@ -264,6 +278,8 @@ describeWithPostgres('recurring availability repository', () => {
         upClinicalWorkspace,
         upSearchAliases,
         upRecurringAvailability,
+        upAvailabilityExceptions,
+        upAvailabilityExceptionGroups,
       ]) {
         await client.query(migrationSql(migration))
       }
@@ -281,6 +297,7 @@ describeWithPostgres('recurring availability repository', () => {
     provider = () => ({ connect: schemaClient })
     repository = createAvailabilityRepository(provider)
     appointmentRepository = createAppointmentRepository(provider)
+    publicRepository = createPublicDoctorRepository(() => ({ query }))
     doctorId = await insertDoctor('approved')
     otherDoctorId = await insertDoctor('other')
     disabledDoctorId = await insertDoctor('disabled', { enabled: false })
@@ -300,6 +317,7 @@ describeWithPostgres('recurring availability repository', () => {
     await query('DELETE FROM slots')
     await query('DELETE FROM availability_blocks')
     await query('DELETE FROM recurring_availability_rules')
+    await query('DELETE FROM availability_exceptions')
   })
 
   afterAll(async () => {
@@ -422,6 +440,51 @@ describeWithPostgres('recurring availability repository', () => {
     expect(after).toHaveLength(before.length + 1)
     expect(after.at(-1).date).toBe('2026-12-17')
     expect(rule.rows[0].cursor).toBe('2026-12-17')
+  })
+
+  it('materializes through a future exception while the overlay remains authoritative', async () => {
+    const exception = await repository.createException({
+      doctorId,
+      date: '2026-12-17',
+      allDay: true,
+    }, now)
+    const created = await create({
+      weekdays: [4],
+      startsOn: '2026-09-17',
+      endsOn: null,
+    })
+    const before = await generatedRows(created.rule.id)
+    expect(before.some(row => row.block_start_at.toISOString().startsWith('2026-12-17'))).toBe(false)
+
+    const extender = createRecurringAvailabilityExtenderService({
+      repository,
+      clock: () => new Date('2026-09-18T00:00:00.000Z'),
+    })
+    await expect(extender.extend()).resolves.toEqual({ scanned: 1, extended: 1, skipped: 0, failed: 0 })
+
+    const materialized = (await generatedRows(created.rule.id)).find(row => (
+      row.slot_start_at.toISOString() === '2026-12-17T03:30:00.000Z'
+    ))
+    expect(materialized).toMatchObject({ is_active: true })
+    expect(await publicRepository.findSlotsByDate(doctorId, '2026-12-17')).toEqual([])
+    await expect(appointmentRepository.book({
+      patientId,
+      patientName: 'Recurring Patient',
+      slotId: Number(materialized.slot_id),
+    })).rejects.toMatchObject({ code: 'SLOT_UNAVAILABLE' })
+
+    await repository.removeException({ doctorId, exceptionId: exception.id }, now)
+    const restored = await publicRepository.findSlotsByDate(doctorId, '2026-12-17')
+    expect(restored.map(slot => Number(slot.id))).toContain(Number(materialized.slot_id))
+  })
+
+  it('does not reveal stopped recurring availability when its exception is removed', async () => {
+    const created = await create({ endsOn: '2026-09-21' })
+    const exception = await repository.createException(allDayException(), now)
+    await repository.stopRecurring({ doctorId, ruleId: created.rule.id, now })
+    await repository.removeException({ doctorId, exceptionId: exception.id }, now)
+
+    expect(await publicRepository.findSlotsByDate(doctorId, '2026-09-21')).toEqual([])
   })
 
   it('caps extension at ends_on and skips the fully evaluated rule afterward', async () => {
@@ -783,29 +846,53 @@ describeWithPostgres('recurring availability repository', () => {
   async function setupRescheduleRace() {
     const originalBlock = await query(
       `INSERT INTO availability_blocks (doctor_id, start_at, end_at)
-       VALUES ($1, '2026-09-22T14:00:00+05:30', '2026-09-22T14:30:00+05:30')
+       VALUES ($1, $2, $3)
        RETURNING id`,
-      [doctorId],
+      [
+        doctorId,
+        `${raceOriginalDate}T14:00:00+05:30`,
+        `${raceOriginalDate}T14:30:00+05:30`,
+      ],
     )
     const originalSlot = await query(
       `INSERT INTO slots (availability_block_id, start_at, end_at)
-       VALUES ($1, '2026-09-22T14:00:00+05:30', '2026-09-22T14:30:00+05:30')
+       VALUES ($1, $2, $3)
        RETURNING id`,
-      [originalBlock.rows[0].id],
+      [
+        originalBlock.rows[0].id,
+        `${raceOriginalDate}T14:00:00+05:30`,
+        `${raceOriginalDate}T14:30:00+05:30`,
+      ],
     )
     const original = await appointmentRepository.book({
       patientId,
       patientName: 'Recurring Patient',
       slotId: Number(originalSlot.rows[0].id),
     })
-    const targetRule = await create({ endsOn: '2026-09-21' })
+    const targetRule = await create({
+      weekdays: [raceWeekday],
+      startsOn: raceDate,
+      endsOn: raceDate,
+    }, raceClock)
     const [targetSlot] = await generatedRows(targetRule.rule.id)
 
     return { original, originalSlot: originalSlot.rows[0], targetRule, targetSlot }
   }
 
+  function allDayException(date = raceDate) {
+    return { doctorId, date, allDay: true }
+  }
+
+  function createRaceRule() {
+    return create({
+      weekdays: [raceWeekday],
+      startsOn: raceDate,
+      endsOn: raceDate,
+    }, raceClock)
+  }
+
   it('waits for a booking that already holds the shared Doctor lock, then preserves it', async () => {
-    const created = await create({ endsOn: '2026-09-21' })
+    const created = await createRaceRule()
     const [slot] = await generatedRows(created.rule.id)
     const bookingGate = sharedLockGate()
     const stopGate = exclusiveLockGate()
@@ -843,7 +930,7 @@ describeWithPostgres('recurring availability repository', () => {
   })
 
   it('makes a booking wait behind stop, then fail without creating an appointment', async () => {
-    const created = await create({ endsOn: '2026-09-21' })
+    const created = await createRaceRule()
     const [slot] = await generatedRows(created.rule.id)
     const stopGate = exclusiveLockGate()
     const bookingGate = sharedLockGate()
@@ -872,6 +959,75 @@ describeWithPostgres('recurring availability repository', () => {
       [slot.block_id, slot.slot_id],
     )
     expect(state.rows[0]).toEqual({ block_exists: false, slot_exists: false, appointment_exists: false })
+  })
+
+  it('lets a booking holding the shared lock win, then rejects the waiting exception', async () => {
+    const created = await createRaceRule()
+    const [slot] = await generatedRows(created.rule.id)
+    const bookingGate = sharedLockGate()
+    const exceptionGate = exclusiveLockGate()
+    const controlledAppointments = createAppointmentRepository(bookingGate.provider)
+    const controlledAvailability = createAvailabilityRepository(exceptionGate.provider)
+
+    const booking = controlledAppointments.book({
+      patientId,
+      patientName: 'Recurring Patient',
+      slotId: Number(slot.slot_id),
+    })
+    await bookingGate.acquired
+    const exception = controlledAvailability.createException(allDayException(), now)
+    await exceptionGate.attempted
+
+    bookingGate.resume()
+    await expect(booking).resolves.toMatchObject({ status: 'booked' })
+    await exceptionGate.acquired
+    exceptionGate.resume()
+    await expect(exception).rejects.toMatchObject({
+      code: 'AVAILABILITY_EXCEPTION_BOOKED_CONFLICT',
+    })
+
+    const state = await query(
+      `SELECT
+         EXISTS (SELECT 1 FROM appointments WHERE slot_id = $1 AND status = 'booked') AS booked,
+         EXISTS (SELECT 1 FROM availability_exceptions WHERE doctor_id = $2) AS exception_exists`,
+      [slot.slot_id, doctorId],
+    )
+    expect(state.rows[0]).toEqual({ booked: true, exception_exists: false })
+  })
+
+  it('lets an exception holding the exclusive lock win, then rejects the waiting booking', async () => {
+    const created = await createRaceRule()
+    const [slot] = await generatedRows(created.rule.id)
+    const exceptionGate = exclusiveLockGate()
+    const bookingGate = sharedLockGate()
+    const controlledAvailability = createAvailabilityRepository(exceptionGate.provider)
+    const controlledAppointments = createAppointmentRepository(bookingGate.provider)
+
+    const exception = controlledAvailability.createException(allDayException(), now)
+    await exceptionGate.acquired
+    const booking = controlledAppointments.book({
+      patientId,
+      patientName: 'Recurring Patient',
+      slotId: Number(slot.slot_id),
+    })
+    await bookingGate.attempted
+
+    exceptionGate.resume()
+    await expect(exception).resolves.toMatchObject({ allDay: true })
+    await bookingGate.acquired
+    bookingGate.resume()
+    await expect(booking).rejects.toMatchObject({ code: 'SLOT_UNAVAILABLE' })
+
+    const state = await query(
+      `SELECT
+         EXISTS (SELECT 1 FROM appointments WHERE slot_id = $1) AS appointment_exists,
+         EXISTS (
+           SELECT 1 FROM availability_exceptions
+           WHERE doctor_id = $2 AND removed_at IS NULL
+         ) AS exception_exists`,
+      [slot.slot_id, doctorId],
+    )
+    expect(state.rows[0]).toEqual({ appointment_exists: false, exception_exists: true })
   })
 
   it('waits for a reschedule that holds the shared Doctor lock, then preserves its replacement', async () => {
@@ -949,6 +1105,91 @@ describeWithPostgres('recurring availability repository', () => {
     ])
     const targetState = await query('SELECT id FROM slots WHERE id = $1', [targetSlot.slot_id])
     expect(targetState.rows).toEqual([])
+  })
+
+  it('lets rescheduling holding the shared lock win, then rejects the waiting exception', async () => {
+    const { original, targetSlot } = await setupRescheduleRace()
+    const rescheduleGate = sharedLockGate()
+    const exceptionGate = exclusiveLockGate()
+    const controlledAppointments = createAppointmentRepository(rescheduleGate.provider)
+    const controlledAvailability = createAvailabilityRepository(exceptionGate.provider)
+
+    const reschedule = controlledAppointments.reschedule({
+      appointmentId: Number(original.id),
+      patientId,
+      slotId: Number(targetSlot.slot_id),
+      now,
+    })
+    await rescheduleGate.acquired
+    const exception = controlledAvailability.createException(allDayException(), now)
+    await exceptionGate.attempted
+
+    rescheduleGate.resume()
+    await expect(reschedule).resolves.toMatchObject({ status: 'booked' })
+    await exceptionGate.acquired
+    exceptionGate.resume()
+    await expect(exception).rejects.toMatchObject({
+      code: 'AVAILABILITY_EXCEPTION_BOOKED_CONFLICT',
+    })
+
+    const appointments = await query(
+      `SELECT status, slot_id, rescheduled_from_appointment_id
+       FROM appointments
+       WHERE id = $1 OR rescheduled_from_appointment_id = $1
+       ORDER BY id`,
+      [original.id],
+    )
+    expect(appointments.rows).toEqual([
+      expect.objectContaining({ status: 'rescheduled' }),
+      expect.objectContaining({
+        status: 'booked',
+        slot_id: targetSlot.slot_id,
+        rescheduled_from_appointment_id: original.id,
+      }),
+    ])
+    expect((await query('SELECT id FROM availability_exceptions')).rowCount).toBe(0)
+  })
+
+  it('lets an exception holding the exclusive lock win, then leaves a blocked reschedule unchanged', async () => {
+    const { original, originalSlot, targetSlot } = await setupRescheduleRace()
+    const exceptionGate = exclusiveLockGate()
+    const rescheduleGate = sharedLockGate()
+    const controlledAvailability = createAvailabilityRepository(exceptionGate.provider)
+    const controlledAppointments = createAppointmentRepository(rescheduleGate.provider)
+
+    const exception = controlledAvailability.createException(allDayException(), now)
+    await exceptionGate.acquired
+    const reschedule = controlledAppointments.reschedule({
+      appointmentId: Number(original.id),
+      patientId,
+      slotId: Number(targetSlot.slot_id),
+      now,
+    })
+    await rescheduleGate.attempted
+
+    exceptionGate.resume()
+    await expect(exception).resolves.toMatchObject({ allDay: true })
+    await rescheduleGate.acquired
+    rescheduleGate.resume()
+    await expect(reschedule).rejects.toMatchObject({ code: 'SLOT_UNAVAILABLE' })
+
+    const appointments = await query(
+      `SELECT status, slot_id, rescheduled_from_appointment_id
+       FROM appointments
+       WHERE id = $1 OR rescheduled_from_appointment_id = $1
+       ORDER BY id`,
+      [original.id],
+    )
+    expect(appointments.rows).toEqual([
+      expect.objectContaining({
+        status: 'booked',
+        slot_id: originalSlot.id,
+        rescheduled_from_appointment_id: null,
+      }),
+    ])
+    expect((await query(
+      'SELECT COUNT(*)::int AS count FROM availability_exceptions WHERE removed_at IS NULL',
+    )).rows[0].count).toBe(1)
   })
 
   it('waits for materialization holding the exclusive lock, then removes its new occurrences', async () => {

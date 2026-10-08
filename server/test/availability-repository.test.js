@@ -12,7 +12,7 @@ const exclusiveAvailabilityLockSql = normalizeSql(`SELECT pg_advisory_xact_lock(
   hashtextextended('medreach:doctor-availability:' || $1::text, 0)
 )`)
 
-function createTransactionalDatabase({ failSlotInsert = false } = {}) {
+function createTransactionalDatabase({ exceptionConflict = false, failSlotInsert = false } = {}) {
   const blocks = []
   const slots = []
   const queries = []
@@ -58,6 +58,9 @@ function createTransactionalDatabase({ failSlotInsert = false } = {}) {
         }
         if (normalized.includes('FROM users u')) {
           return { rows: [{ is_enabled: true, verification_status: 'approved' }], rowCount: 1 }
+        }
+        if (normalized.endsWith('AS has_exception')) {
+          return { rows: [{ has_exception: exceptionConflict }], rowCount: 1 }
         }
         if (normalized.includes('FROM recurring_availability_rules')) {
           return { rows: [], rowCount: 0 }
@@ -319,6 +322,17 @@ describe('availability repository transactions', () => {
     const advisoryLocks = database.queries.filter(query => query.sql === exclusiveAvailabilityLockSql)
     expect(advisoryLocks).toHaveLength(2)
     expect(advisoryLocks.every(query => query.values[0] === 10)).toBe(true)
+  })
+
+  it('rejects one-off creation over an active exception before writing a block', async () => {
+    const database = createTransactionalDatabase({ exceptionConflict: true })
+    const repository = createAvailabilityRepository(database.provider)
+
+    await expect(repository.create(interval)).rejects.toMatchObject({
+      code: 'AVAILABILITY_EXCEPTION_CONFLICT',
+    })
+    expect(database.blocks).toHaveLength(0)
+    expect(database.slots).toHaveLength(0)
   })
 
   it('atomically removes slots and their unused future block', async () => {

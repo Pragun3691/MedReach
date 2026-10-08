@@ -1,5 +1,8 @@
 import {
   availabilityBlockIdSchema,
+  availabilityExceptionIdSchema,
+  availabilityExceptionRangeIdSchema,
+  createAvailabilityExceptionSchema,
   createAvailabilitySchema,
   createRecurringAvailabilitySchema,
   recurringAvailabilityRuleIdSchema,
@@ -31,6 +34,33 @@ export function createAvailabilityController(service) {
       const rule = await service.createRecurring(request.authUser.id, input)
 
       response.status(201).json({ rule })
+    },
+
+    async listExceptions(request, response) {
+      const exceptions = await service.listExceptions(request.authUser.id)
+
+      response.status(200).json(exceptions)
+    },
+
+    async createException(request, response) {
+      const input = createAvailabilityExceptionSchema.parse(request.body)
+      const result = await service.createException(request.authUser.id, input)
+
+      response.status(201).json('startDate' in input ? { range: result } : { exception: result })
+    },
+
+    async removeExceptionRange(request, response) {
+      const rangeId = availabilityExceptionRangeIdSchema.parse(request.params.rangeId)
+      await service.removeExceptionRange(request.authUser.id, rangeId)
+
+      response.status(204).send()
+    },
+
+    async removeException(request, response) {
+      const exceptionId = availabilityExceptionIdSchema.parse(request.params.exceptionId)
+      await service.removeException(request.authUser.id, exceptionId)
+
+      response.status(204).send()
     },
 
     async stopRecurring(request, response) {
