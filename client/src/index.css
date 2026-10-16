@@ -1161,6 +1161,49 @@ select {
 .doctor-onboarding .relative > button { color: #355f55; }
 .doctor-onboarding .relative > button:hover { background: #edf2ed; }
 
+.form-field-error {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  margin-top: 0.4rem;
+  color: #924443;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.form-field-error > span {
+  display: inline-flex;
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.registration-form input:not([type='checkbox'])[aria-invalid='true'],
+.registration-form textarea[aria-invalid='true'],
+.registration-form fieldset[aria-invalid='true'] .doctor-specialization {
+  border-color: #a45a50;
+}
+
+.registration-form input:not([type='checkbox'])[aria-invalid='true']:focus,
+.registration-form textarea[aria-invalid='true']:focus {
+  box-shadow: 0 0 0 3px rgba(164, 90, 80, 0.14);
+}
+
+.registration-feedback {
+  margin-top: 1.25rem;
+  border-left: 2px solid #a45a50;
+  padding: 0.5rem 0.85rem;
+  color: #924443;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
 .doctor-form-section-heading {
   display: flex;
   align-items: center;

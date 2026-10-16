@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { AuthPageFrame } from '../components/AuthPageFrame.jsx'
 import { FormField, inputClassName, PasswordField } from '../components/FormField.jsx'
@@ -60,20 +60,6 @@ function optional(value) {
   return normalized || undefined
 }
 
-function ErrorSummary({ errors }) {
-  const entries = Object.entries(errors).filter(([, message]) => message)
-  if (entries.length === 0) return null
-
-  return (
-    <div className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
-      <p className="font-semibold">Please fix the following:</p>
-      <ul className="mt-1 list-disc space-y-1 pl-5">
-        {entries.map(([field, message]) => <li key={field}><a className="underline underline-offset-2" href={`#register-${field}`}>{message}</a></li>)}
-      </ul>
-    </div>
-  )
-}
-
 export function RegisterPage() {
   const languageState = useLanguage()
   const navigate = useNavigate()
@@ -83,11 +69,14 @@ export function RegisterPage() {
   const returnTo = safeInternalReturnTo(searchParams.get('returnTo'))
   const [patient, setPatient] = useState(initialPatient)
   const [doctor, setDoctor] = useState(initialDoctor)
-  const [errors, setErrors] = useState({})
-  const [apiError, setApiError] = useState('')
+  const [patientErrors, setPatientErrors] = useState({})
+  const [doctorErrors, setDoctorErrors] = useState({})
+  const [patientApiError, setPatientApiError] = useState('')
+  const [doctorApiError, setDoctorApiError] = useState('')
   const [passwordVisible, setPasswordVisible] = useState(false)
   const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const submissionPending = useRef(false)
   const [specializations, setSpecializations] = useState([])
   const [specializationError, setSpecializationError] = useState('')
   const [doctorStep, setDoctorStep] = useState(1)
@@ -104,32 +93,50 @@ export function RegisterPage() {
 
   const values = role === 'doctor' ? doctor : patient
   const setValues = role === 'doctor' ? setDoctor : setPatient
+  const errors = role === 'doctor' ? doctorErrors : patientErrors
+  const setErrors = role === 'doctor' ? setDoctorErrors : setPatientErrors
+  const apiError = role === 'doctor' ? doctorApiError : patientApiError
+  const setApiError = role === 'doctor' ? setDoctorApiError : setPatientApiError
+
+  function validate(nextValues) {
+    return role === 'doctor' ? validateDoctor(nextValues) : validateBase(nextValues, t)
+  }
+
+  function blur(field) {
+    const nextErrors = validate(values)
+    // A key also records that a valid field has been visited. Preserve API
+    // feedback on repeated blur until the user actually edits that field.
+    setErrors(current => Object.hasOwn(current, field) ? current : { ...current, [field]: nextErrors[field] })
+  }
 
   function update(field, value) {
+    const nextErrors = validate({ ...values, [field]: value })
     setValues(current => ({ ...current, [field]: value }))
-    setErrors(current => ({ ...current, [field]: undefined }))
+    setErrors(current => ({
+      ...current,
+      ...(Object.hasOwn(current, field) ? { [field]: nextErrors[field] } : {}),
+      ...(field === 'password' && Object.hasOwn(current, 'confirmPassword')
+        ? { confirmPassword: nextErrors.confirmPassword } : {}),
+    }))
     setApiError('')
   }
 
   function toggleSpecialization(id) {
     const selected = doctor.specializationIds.includes(id)
-    setDoctor(current => ({
-      ...current,
-      specializationIds: selected
-        ? current.specializationIds.filter(value => value !== id)
-        : [...current.specializationIds, id],
-    }))
-    setErrors(current => ({ ...current, specializationIds: undefined }))
+    update('specializationIds', selected
+      ? doctor.specializationIds.filter(value => value !== id)
+      : [...doctor.specializationIds, id])
   }
 
   function focusFirstInvalid(nextErrors) {
-    const firstField = Object.keys(nextErrors)[0]
-    if (!firstField) return
     requestAnimationFrame(() => {
-      const target = firstField === 'specializationIds'
-        ? document.querySelector('#register-specializationIds input')
-        : document.getElementById(`register-${firstField}`)
-      target?.focus()
+      // Use the rendered order, including when an API error returns Step 1.
+      const target = [...document.querySelectorAll('[id^="register-"]')]
+        .find(element => nextErrors[element.id.slice('register-'.length)])
+      const control = target?.id === 'register-specializationIds'
+        ? target.querySelector('input') ?? target
+        : target
+      control?.focus()
     })
   }
 
@@ -137,8 +144,7 @@ export function RegisterPage() {
     const nextErrors = validateDoctorStepOne(doctor)
     setErrors(current => ({
       ...current,
-      ...Object.fromEntries(doctorStepOneFields.map(field => [field, undefined])),
-      ...nextErrors,
+      ...Object.fromEntries(doctorStepOneFields.map(field => [field, nextErrors[field]])),
     }))
 
     if (Object.keys(nextErrors).length > 0) {
@@ -153,19 +159,21 @@ export function RegisterPage() {
 
   async function handleSubmit(event) {
     event.preventDefault()
+    if (submissionPending.current) return
     if (role === 'doctor' && doctorStep === 1) {
       continueDoctorRegistration()
       return
     }
-    const nextErrors = role === 'doctor' ? validateDoctor(values) : validateBase(values, t)
+    const nextErrors = validate(values)
+    setErrors(Object.fromEntries(Object.keys(values).map(field => [field, nextErrors[field]])))
 
     if (Object.keys(nextErrors).length > 0) {
-      setErrors(nextErrors)
       if (role === 'doctor' && doctorStepOneFields.some(field => nextErrors[field])) setDoctorStep(1)
       focusFirstInvalid(nextErrors)
       return
     }
 
+    submissionPending.current = true
     setSubmitting(true)
     setApiError('')
 
@@ -204,6 +212,7 @@ export function RegisterPage() {
       } else if (error.code === 'INVALID_SPECIALIZATION') {
         setErrors({ specializationIds: 'One of the selected specializations is no longer available.' })
         setApiError('Please review your specialization choices and try again.')
+        focusFirstInvalid({ specializationIds: true })
       } else if (error.code === 'VALIDATION_ERROR') {
         const fieldErrors = Object.fromEntries(
           error.details.map(detail => [detail.field.split('.')[0], detail.message]),
@@ -216,6 +225,7 @@ export function RegisterPage() {
         setApiError(role === 'patient' ? t('auth.registerError') : 'We could not create your account right now. Please try again.')
       }
     } finally {
+      submissionPending.current = false
       setSubmitting(false)
     }
   }
@@ -223,7 +233,7 @@ export function RegisterPage() {
   const field = (name, label, options = {}) => (
     <FormField error={errors[name]} id={`register-${name}`} label={label} hint={options.hint}>
       <input
-        aria-describedby={errors[name] ? `register-${name}-error` : undefined}
+        aria-describedby={errors[name] ? `register-${name}-error` : options.hint ? `register-${name}-hint` : undefined}
         aria-invalid={Boolean(errors[name])}
         autoComplete={options.autoComplete}
         className={inputClassName}
@@ -232,6 +242,7 @@ export function RegisterPage() {
         max={options.max}
         min={options.min}
         onChange={event => update(name, event.target.value)}
+        onBlur={() => blur(name)}
         placeholder={options.placeholder}
         required={options.required !== false}
         type={options.type ?? 'text'}
@@ -291,10 +302,9 @@ export function RegisterPage() {
           </nav>
         )}
 
-        {apiError && <div className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{apiError}</div>}
-        {role === 'doctor' && <ErrorSummary errors={Object.fromEntries(Object.entries(errors).filter(([field]) => doctorStep === 1 ? doctorStepOneFields.includes(field) : !doctorStepOneFields.includes(field)))} />}
+        {apiError && <div className="registration-feedback" role="alert">{apiError}</div>}
 
-        <form className="mt-6 space-y-5" noValidate onSubmit={handleSubmit}>
+        <form className="registration-form mt-6 space-y-5" aria-busy={submitting} noValidate onSubmit={handleSubmit}>
           {(role === 'patient' || doctorStep === 1) && (
             <div className={role === 'doctor' ? 'doctor-step-panel' : 'grid gap-5'} key="account-step">
               <div className={role === 'patient' ? 'grid gap-5' : 'grid gap-5 sm:grid-cols-2'}>
@@ -310,6 +320,7 @@ export function RegisterPage() {
                   id="register-password"
                   label={role === 'patient' ? t('auth.password') : 'Password'}
                   onChange={event => update('password', event.target.value)}
+                  onBlur={() => blur('password')}
                   onToggle={() => setPasswordVisible(value => !value)}
                   value={values.password}
                   visible={passwordVisible}
@@ -322,6 +333,7 @@ export function RegisterPage() {
                   id="register-confirmPassword"
                   label={role === 'patient' ? t('auth.confirmPassword') : 'Confirm password'}
                   onChange={event => update('confirmPassword', event.target.value)}
+                  onBlur={() => blur('confirmPassword')}
                   onToggle={() => setConfirmPasswordVisible(value => !value)}
                   value={values.confirmPassword}
                   visible={confirmPasswordVisible}
@@ -341,11 +353,14 @@ export function RegisterPage() {
             <div className="doctor-step-panel" key="profile-step">
               <FormField error={errors.bio} id="register-bio" label="Bio (optional)">
                 <textarea
+                  aria-describedby={errors.bio ? 'register-bio-error' : undefined}
+                  aria-invalid={Boolean(errors.bio)}
                   className={`${inputClassName} min-h-28 py-3`}
                   disabled={submitting}
                   id="register-bio"
                   maxLength={4000}
                   onChange={event => update('bio', event.target.value)}
+                  onBlur={() => blur('bio')}
                   placeholder="Briefly describe your practice and approach to care."
                   value={doctor.bio}
                 />
@@ -362,17 +377,26 @@ export function RegisterPage() {
                 <p>Specializations</p>
                 <small>Select every area that applies</small>
               </div>
-              <fieldset className="doctor-specializations">
+              <fieldset
+                className="doctor-specializations"
+                aria-describedby={errors.specializationIds ? 'register-specializationIds-hint register-specializationIds-error' : 'register-specializationIds-hint'}
+                aria-invalid={Boolean(errors.specializationIds)}
+                onBlur={event => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) blur('specializationIds')
+                }}
+              >
                 <legend className="sr-only">Specializations</legend>
-                <p>Choose at least one specialization. Multiple selections are supported.</p>
+                <p id="register-specializationIds-hint">Choose at least one specialization. Multiple selections are supported.</p>
                 {specializationError && <p className="doctor-specializations__error" role="alert">{specializationError}</p>}
                 {!specializationError && specializations.length === 0 && <div className="h-20 animate-pulse rounded-md bg-[#EEE9DF]" aria-label="Loading specializations" />}
-                <div className="doctor-specialization-grid" id="register-specializationIds">
+                <div className="doctor-specialization-grid" id="register-specializationIds" tabIndex="-1">
                   {specializations.map(item => {
                     const selected = doctor.specializationIds.includes(item.id)
                     return (
                       <label className="doctor-specialization" data-selected={selected} key={item.id}>
                         <input
+                          aria-describedby={errors.specializationIds ? 'register-specializationIds-error' : 'register-specializationIds-hint'}
+                          aria-invalid={Boolean(errors.specializationIds)}
                           checked={selected}
                           disabled={submitting}
                           onChange={() => toggleSpecialization(item.id)}
@@ -384,7 +408,9 @@ export function RegisterPage() {
                     )
                   })}
                 </div>
-                {errors.specializationIds && <p className="mt-2 text-sm text-red-700" id="register-specializationIds-error">{errors.specializationIds}</p>}
+                <div aria-live="polite" aria-atomic="true">
+                  {errors.specializationIds && <p className="form-field-error" id="register-specializationIds-error"><span aria-hidden="true">!</span>{errors.specializationIds}</p>}
+                </div>
               </fieldset>
 
               <div className="doctor-verification-note">
@@ -396,7 +422,10 @@ export function RegisterPage() {
 
           {role === 'doctor' && doctorStep === 2 ? (
             <div className="doctor-form-actions">
-              <button className="doctor-back" disabled={submitting} onClick={() => setDoctorStep(1)} type="button">← Back</button>
+              <button className="doctor-back" disabled={submitting} onClick={() => {
+                setDoctorStep(1)
+                requestAnimationFrame(() => document.getElementById('register-form-heading')?.focus())
+              }} type="button">← Back</button>
               <button className="doctor-submit" disabled={submitting} type="submit">
                 {submitting ? 'Creating account…' : 'Submit for review →'}
               </button>
