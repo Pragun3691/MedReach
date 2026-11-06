@@ -50,4 +50,26 @@ describe('PublicHeader role-aware navigation', () => {
     expect(host.querySelectorAll('a[href="/appointments"]')).toHaveLength(2)
     await act(async () => root.unmount())
   })
+
+  it('shows an accessible persisted selector for public users and switches header text', async () => {
+    const { host, root } = await renderHeader(null)
+    const group = host.querySelector('[role="group"]')
+    const hindi = group.querySelector('button[lang="hi"]')
+    expect(group.getAttribute('aria-label')).toBe('Language')
+    expect(hindi.getAttribute('aria-pressed')).toBe('false')
+    await act(async () => hindi.click())
+    expect(hindi.getAttribute('aria-pressed')).toBe('true')
+    expect(host.textContent).toContain('डॉक्टर खोजें')
+    expect(window.localStorage.getItem('medreach.language')).toBe('hi')
+    await act(async () => root.unmount())
+  })
+
+  it.each(['doctor', 'admin'])('hides the selector and keeps %s header controls English', async role => {
+    window.localStorage.setItem('medreach.language', 'hi')
+    const { host, root } = await renderHeader({ id: 3, fullName: 'Dr. Rohan Mehta', role })
+    expect(host.querySelector('[role="group"]')).toBeNull()
+    expect(host.textContent).toContain('Logout')
+    expect(host.textContent).not.toContain('लॉग आउट')
+    await act(async () => root.unmount())
+  })
 })

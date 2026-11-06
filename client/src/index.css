@@ -1003,6 +1003,12 @@ select {
   color: #0f2747;
 }
 
+.doctor-register-page {
+  --doctor-register-header-height: calc(4.75rem + 1px);
+  /* Clip horizontal overflow without creating a sticky scroll container. */
+  overflow-x: clip;
+}
+
 .doctor-register-shell {
   display: grid;
   grid-template-columns: minmax(20rem, 34%) minmax(0, 66%);
@@ -1012,8 +1018,8 @@ select {
 
 .doctor-register-context {
   position: sticky;
-  top: 4.75rem;
-  min-height: calc(100vh - 4.75rem);
+  top: var(--doctor-register-header-height);
+  min-height: calc(100dvh - var(--doctor-register-header-height));
   align-self: start;
   background: #0b2441;
   color: white;
@@ -1677,6 +1683,21 @@ select {
   text-align: center;
 }
 
+/* Keep the complete sidebar visible on laptops without an inner scroller. */
+@media (min-width: 1024px) and (min-height: 44rem) and (max-height: 56rem) {
+  .doctor-register-context__image { height: clamp(7rem, 18dvh, 10rem); }
+  .doctor-register-context__copy { padding: clamp(1.25rem, 3dvh, 2rem); }
+  .doctor-register-context__copy > span { margin-top: 0.9rem; }
+  .doctor-register-review { margin-top: 1.25rem; padding-top: 1rem; }
+}
+
+@media (max-width: 1023px), (max-height: 43.999rem) {
+  .doctor-register-context {
+    position: static;
+    min-height: 0;
+  }
+}
+
 @media (min-width: 768px) and (max-width: 1023px) {
   .doctor-register-shell { grid-template-columns: minmax(18rem, 34%) minmax(0, 66%); }
   .doctor-register-context__copy { padding: 2.25rem; }
@@ -1686,7 +1707,6 @@ select {
 
 @media (max-width: 767px) {
   .doctor-register-shell { display: block; }
-  .doctor-register-context { position: static; min-height: 0; }
   .doctor-register-context__image { height: 7.5rem; }
   .doctor-register-context__copy { padding: 1.35rem 1.25rem 1.5rem; }
   .doctor-register-context__copy h1 { margin-top: 0.5rem; font-size: 1.7rem; }
