@@ -72,10 +72,10 @@ export function PublicHeader({ overlay = false, editorial = false, forceEnglish 
   const [logoutPending, setLogoutPending] = useState(false)
   const [logoutError, setLogoutError] = useState(false)
   const [hasScrolled, setHasScrolled] = useState(false)
-  const appointmentPath = currentUser?.role === 'doctor' ? '/doctor/appointments' : '/appointments'
+  const appointmentPath = currentUser?.role === 'admin' ? '/admin/doctor-verifications' : currentUser?.role === 'doctor' ? '/doctor/appointments' : '/appointments'
   const patientFacing = !forceEnglish && (status !== 'authenticated' || currentUser?.role === 'patient')
   const t = patientFacing ? languageState.t : (key, values) => translateMessage('en', key, values)
-  const appointmentLabel = currentUser?.role === 'doctor' ? t('navigation.appointments') : t('navigation.myAppointments')
+  const appointmentLabel = currentUser?.role === 'admin' ? 'Doctor verification' : currentUser?.role === 'doctor' ? t('navigation.appointments') : t('navigation.myAppointments')
   const inverse = overlay && !hasScrolled
 
   useEffect(() => {
@@ -112,6 +112,7 @@ export function PublicHeader({ overlay = false, editorial = false, forceEnglish 
           {currentUser?.role !== 'doctor' && <NavLink className={({ isActive }) => `hidden md:block ${navigationClass({ isActive }, inverse, editorial)}`} to="/doctors">{t('navigation.findDoctors')}</NavLink>}
           {status === 'authenticated' && currentUser && <NavLink className={({ isActive }) => `hidden md:block ${navigationClass({ isActive }, inverse, editorial)}`} to={appointmentPath}>{appointmentLabel}</NavLink>}
           {currentUser?.role === 'doctor' && <NavLink className={({ isActive }) => `hidden md:block ${navigationClass({ isActive }, inverse, editorial)}`} to="/doctor/availability">Availability</NavLink>}
+          {currentUser?.role === 'doctor' && <NavLink className={({ isActive }) => `hidden md:block ${navigationClass({ isActive }, inverse, editorial)}`} to="/doctor/verification">Verification</NavLink>}
           {patientFacing && <LanguageControl className={status === 'authenticated' ? 'patient-header-language--desktop hidden md:inline-flex' : ''} inverse={inverse} />}
           {status === 'loading' && <span className={`h-10 w-28 animate-pulse rounded-lg ${inverse ? 'bg-white/15' : 'bg-slate-100'}`} aria-label={t('navigation.checkingSession')} />}
           {status === 'anonymous' && (
@@ -141,6 +142,7 @@ export function PublicHeader({ overlay = false, editorial = false, forceEnglish 
           {currentUser.role !== 'doctor' && <NavLink className={({ isActive }) => navigationClass({ isActive }, inverse, editorial)} to="/doctors">{t('navigation.findDoctors')}</NavLink>}
           <NavLink className={({ isActive }) => navigationClass({ isActive }, inverse, editorial)} to={appointmentPath}>{appointmentLabel}</NavLink>
           {currentUser.role === 'doctor' && <NavLink className={({ isActive }) => navigationClass({ isActive }, inverse, editorial)} to="/doctor/availability">Availability</NavLink>}
+          {currentUser.role === 'doctor' && <NavLink className={({ isActive }) => navigationClass({ isActive }, inverse, editorial)} to="/doctor/verification">Verification</NavLink>}
           <span className={`ml-auto truncate text-xs ${inverse ? 'text-white/60' : 'text-slate-500'}`}>{t('navigation.greeting')} {firstName(currentUser.fullName)}</span>
         </nav>
       )}

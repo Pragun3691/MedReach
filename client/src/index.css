@@ -1,5 +1,44 @@
 @import "tailwindcss";
 
+.verification-workspace { min-height: 100vh; background: #f3efe6; color: #263b40; }
+.verification-shell { max-width: 850px; margin: auto; padding: 3rem 1.25rem 5rem; }
+.verification-shell-wide { max-width: 1280px; }
+.verification-eyebrow { margin-bottom: .65rem; color: #346b5f; font-size: .75rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.verification-shell h1 { color: #153849; font-size: clamp(1.8rem, 4vw, 2.6rem); line-height: 1.2; font-weight: 600; }
+.verification-shell h2 { margin: .8rem 0; color: #173b45; font-size: 1.2rem; font-weight: 600; }
+.verification-shell h3 { margin: .8rem 0; font-size: 1.1rem; font-weight: 600; }
+.verification-intro { max-width: 720px; margin: 1rem 0 2rem; line-height: 1.75; color: #54676a; }
+.verification-panel { padding: 1.5rem; border: 1px solid #d6d6c9; border-radius: 12px; background: #fdfbf6; min-width: 0; overflow-wrap: anywhere; }
+.verification-panel p { margin: .7rem 0; line-height: 1.65; }
+.verification-form { display: grid; gap: 1.25rem; margin-top: 1.5rem; }
+.verification-shell button, .verification-primary { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; border: 1px solid #9aaea5; border-radius: 6px; padding: .6rem 1rem; font-size: .875rem; font-weight: 600; cursor: pointer; }
+.verification-shell button:hover { background: #e7eee7; }
+.verification-shell button:focus-visible, .verification-shell a:focus-visible, .verification-shell textarea:focus-visible { outline: 3px solid #427e72; outline-offset: 3px; }
+.verification-shell button:disabled { cursor: default; opacity: .5; }
+.verification-shell .verification-primary { background: #235c50; border-color: #235c50; color: #fff; }
+.verification-shell .verification-primary:hover { background: #19483e; }
+.verification-shell .verification-danger { color: #8b3d34; border-color: #ae796f; }
+.verification-badge { display: inline-block; border-radius: 20px; background: #ede8da; color: #675326; padding: .3rem .75rem; font-size: .75rem; font-weight: 700; }
+.verification-badge[data-status='approved'] { background: #e1eee3; color: #235b43; }
+.verification-badge[data-status='rejected'] { background: #f4e4de; color: #8b3d34; }
+.verification-notice { margin: 1rem 0; padding: .85rem 1rem; border-left: 3px solid #a36b50; background: #f4e9de; color: #783e30; }
+.verification-success { margin: 1rem 0; padding: 1rem; background: #e1eee3; color: #235b43; border-radius: 8px; }
+.verification-details { display: grid; gap: 1rem; margin: 1.25rem 0; }
+.verification-details dt { color: #5b6c69; font-size: .75rem; font-weight: 600; margin-bottom: .25rem; }
+.verification-details dd { font-size: .9rem; overflow-wrap: anywhere; }
+.verification-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.verification-filters, .verification-actions { display: flex; gap: .6rem; flex-wrap: wrap; margin: 1.5rem 0; }
+.verification-filters button[aria-pressed='true'] { background: #235c50; color: white; border-color: #235c50; }
+.verification-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 1.5rem; align-items: start; }
+.verification-list { display: grid; gap: 1rem; min-width: 0; }
+.verification-review { position: sticky; top: 6rem; }
+.verification-review .verification-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.verification-disclosure { padding: 1rem 0; border-top: 1px solid #d6d6c9; color: #5a6c65; font-size: .85rem; }
+.verification-confirmation { margin-top: 1.25rem; padding-top: .5rem; border-top: 1px solid #d6d6c9; }
+.verification-confirmation label { display: block; margin: 1rem 0 .5rem; font-size: .9rem; font-weight: 600; }
+.verification-confirmation textarea { width: 100%; min-height: 120px; border: 1px solid #9aaea5; border-radius: 6px; padding: .75rem; background: white; }
+@media (max-width: 800px) { .verification-layout { grid-template-columns: 1fr; } .verification-review { position: static; } .verification-panel { padding: 1.1rem; } }
+
 html {
   color-scheme: light;
   scroll-behavior: smooth;

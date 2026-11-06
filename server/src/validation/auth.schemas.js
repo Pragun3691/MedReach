@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { calendarDateSchema } from './public-doctor.schemas.js'
+import { credentialFields } from './verification.schemas.js'
 
 const currentDate = () => new Date().toISOString().slice(0, 10)
 
@@ -29,6 +30,7 @@ export const patientRegistrationSchema = z.object({
 }).strict()
 
 export const doctorRegistrationSchema = z.object({
+  ...credentialFields,
   fullName: fullNameSchema,
   email: emailSchema,
   password: passwordSchema,

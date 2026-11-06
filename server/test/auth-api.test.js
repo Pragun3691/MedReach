@@ -14,6 +14,8 @@ const doctorPayload = {
   email: 'vikram.sen@example.com',
   password: 'Another secure password 2026',
   qualification: 'MBBS, MD',
+  registrationNumber: 'TEST-REG-2026',
+  issuingAuthority: 'Test Medical Council',
   experienceYears: 8,
   specializationIds: [1, 2],
   bio: 'Provides careful, evidence-based consultations.',
@@ -35,7 +37,7 @@ function createRepository() {
   const patientProfiles = new Map()
   const doctorProfiles = new Map()
   const doctorSpecializations = new Map()
-  const doctorVerifications = new Set()
+  const doctorVerifications = new Map()
   const validSpecializationIds = new Set([1, 2, 3])
 
   function insertUser(input, role) {
@@ -78,6 +80,7 @@ function createRepository() {
         experienceYears: input.experienceYears,
       })
       doctorSpecializations.set(user.id, [...input.specializationIds])
+      doctorVerifications.set(user.id, { status: 'pending', registrationNumber: input.registrationNumber, issuingAuthority: input.issuingAuthority })
       return user
     },
 
@@ -96,7 +99,7 @@ function createRepository() {
 
     publicDoctorIds() {
       return users
-        .filter(user => user.role === 'doctor' && user.is_enabled && doctorVerifications.has(user.id))
+        .filter(user => user.role === 'doctor' && user.is_enabled && doctorVerifications.get(user.id)?.status === 'approved')
         .map(user => user.id)
     },
   }
@@ -153,7 +156,7 @@ describe('authentication API', () => {
       experienceYears: 8,
     })
     expect(repository.doctorSpecializations.get(1)).toEqual([1, 2])
-    expect(repository.doctorVerifications.size).toBe(0)
+    expect(repository.doctorVerifications.get(1)).toMatchObject({ status: 'pending' })
     expect(repository.publicDoctorIds()).toEqual([])
   })
 

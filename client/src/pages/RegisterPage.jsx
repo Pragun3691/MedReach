@@ -6,6 +6,7 @@ import { listSpecializations, registerDoctorAccount, registerPatientAccount } fr
 import { safeInternalReturnTo } from '../lib/navigation.js'
 import { useLanguage } from '../hooks/useLanguage.js'
 import { translateMessage } from '../i18n/messages.js'
+import { validateCredentials } from '../lib/verification.js'
 
 const initialPatient = { fullName: '', email: '', password: '', confirmPassword: '' }
 const initialDoctor = {
@@ -14,6 +15,8 @@ const initialDoctor = {
   password: '',
   confirmPassword: '',
   qualification: '',
+  registrationNumber: '',
+  issuingAuthority: '',
   experienceYears: '',
   specializationIds: [],
   bio: '',
@@ -23,7 +26,7 @@ const initialDoctor = {
   defaultFee: '',
 }
 
-const doctorStepOneFields = ['fullName', 'email', 'password', 'confirmPassword', 'qualification', 'experienceYears']
+const doctorStepOneFields = ['fullName', 'email', 'password', 'confirmPassword', 'qualification', 'experienceYears', 'registrationNumber', 'issuingAuthority']
 
 function validateBase(values, t = (key, data) => translateMessage('en', key, data)) {
   const errors = {}
@@ -37,7 +40,7 @@ function validateBase(values, t = (key, data) => translateMessage('en', key, dat
 }
 
 function validateDoctor(values) {
-  const errors = validateBase(values)
+  const errors = { ...validateBase(values), ...validateCredentials(values) }
   if (values.qualification.trim().length < 2) errors.qualification = 'Enter your professional qualification.'
   const experience = Number(values.experienceYears)
   if (values.experienceYears === '' || !Number.isInteger(experience) || experience < 0 || experience > 80) {
@@ -190,6 +193,8 @@ export function RegisterPage() {
           email: doctor.email,
           password: doctor.password,
           qualification: doctor.qualification,
+          registrationNumber: doctor.registrationNumber.trim(),
+          issuingAuthority: doctor.issuingAuthority.trim(),
           experienceYears: Number(doctor.experienceYears),
           specializationIds: doctor.specializationIds,
           bio: optional(doctor.bio),
@@ -209,6 +214,10 @@ export function RegisterPage() {
         setApiError(role === 'patient' ? t('auth.emailUsedCopy') : 'This email is already registered. Try logging in instead.')
         if (role === 'doctor') setDoctorStep(1)
         focusFirstInvalid({ email: true })
+      } else if (error.code === 'CREDENTIALS_IN_USE') {
+        setApiError('These registration credentials cannot be submitted. Please check them or contact support.')
+        setDoctorStep(1)
+        focusFirstInvalid({ registrationNumber: true })
       } else if (error.code === 'INVALID_SPECIALIZATION') {
         setErrors({ specializationIds: 'One of the selected specializations is no longer available.' })
         setApiError('Please review your specialization choices and try again.')
@@ -240,6 +249,7 @@ export function RegisterPage() {
         disabled={submitting}
         id={`register-${name}`}
         max={options.max}
+        maxLength={options.maxLength}
         min={options.min}
         onChange={event => update(name, event.target.value)}
         onBlur={() => blur(name)}
@@ -340,6 +350,12 @@ export function RegisterPage() {
                   toggleLabels={role === 'patient' ? { show: t('auth.show'), hide: t('auth.hide') } : undefined}
                 />
               </div>
+              {role === 'doctor' && (
+                <div className="grid gap-5 sm:grid-cols-2">
+                  {field('registrationNumber', 'Medical registration number', { maxLength: 100, hint: 'Use the number issued by your medical council.' })}
+                  {field('issuingAuthority', 'Issuing authority', { maxLength: 160, hint: 'Name the council or authority that issued your registration.' })}
+                </div>
+              )}
               {role === 'doctor' && (
                 <div className="grid gap-5 sm:grid-cols-2">
                   {field('qualification', 'Qualification', { placeholder: 'MBBS, MD' })}

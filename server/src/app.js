@@ -20,6 +20,8 @@ import { appointmentService } from './services/appointment.service.js'
 import { notificationService } from './services/notification.service.js'
 import { publicDoctorService } from './services/public-doctor.service.js'
 import { specializationService } from './services/specialization.service.js'
+import { createAdminVerificationRouter, createDoctorVerificationRouter } from './routes/verification.routes.js'
+import { verificationService } from './services/verification.service.js'
 
 export function createApp({
   auth = authService,
@@ -28,6 +30,7 @@ export function createApp({
   doctors = publicDoctorService,
   notifications = notificationService,
   specializations = specializationService,
+  verifications = verificationService,
   sessionMiddleware,
   frontendDirectory,
 } = {}) {
@@ -45,6 +48,8 @@ export function createApp({
   app.use('/api/appointments', createAppointmentRouter(appointments, authenticate))
   app.use('/api/notifications', createNotificationRouter(notifications, authenticate))
   app.use('/api/specializations', createSpecializationRouter(specializations))
+  app.use('/api/admin/doctor-verifications', createAdminVerificationRouter(verifications, authenticate))
+  app.use('/api/doctors/me/verification', createDoctorVerificationRouter(verifications, authenticate))
   app.use('/api/doctors', createDoctorAppointmentRouter(appointments, authenticate))
   app.use('/api/doctors', createDoctorAvailabilityRouter(availability, authenticate))
   app.use('/api/doctors', createPublicDoctorRouter(doctors))

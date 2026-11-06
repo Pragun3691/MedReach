@@ -11,6 +11,8 @@ import { LoginPage } from './pages/LoginPage.jsx'
 import { NotificationsPage } from './pages/NotificationsPage.jsx'
 import { RegisterPage } from './pages/RegisterPage.jsx'
 import { useLanguage } from './hooks/useLanguage.js'
+import { AdminDoctorVerificationsPage } from './pages/AdminDoctorVerificationsPage.jsx'
+import { DoctorVerificationPage } from './pages/DoctorVerificationPage.jsx'
 
 function NotFoundPage() {
   const { t } = useLanguage()
@@ -39,6 +41,8 @@ function App() {
       <Route path="/doctors/:doctorId" element={<DoctorProfilePage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/admin/doctor-verifications" element={<ProtectedRoute allowedRoles={['admin']}><AdminDoctorVerificationsPage /></ProtectedRoute>} />
+      <Route path="/doctor/verification" element={<ProtectedRoute allowedRoles={['doctor']}><DoctorVerificationPage /></ProtectedRoute>} />
       <Route
         path="/appointments"
         element={<ProtectedRoute allowedRoles={['patient']}><AppointmentsPage /></ProtectedRoute>}

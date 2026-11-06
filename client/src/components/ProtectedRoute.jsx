@@ -43,7 +43,7 @@ export function ProtectedRoute({ allowedRoles, children }) {
   }
 
   if (!currentUser || !allowedRoles.includes(currentUser.role)) {
-    const destination = currentUser?.role === 'doctor' ? '/doctor/appointments' : currentUser?.role === 'patient' ? '/appointments' : '/doctors'
+    const destination = currentUser?.role === 'admin' ? '/admin/doctor-verifications' : currentUser?.role === 'doctor' ? '/doctor/appointments' : currentUser?.role === 'patient' ? '/appointments' : '/doctors'
     return (
       <div className="min-h-screen bg-slate-50">
         <PublicHeader />

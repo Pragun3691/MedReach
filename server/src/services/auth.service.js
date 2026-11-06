@@ -30,6 +30,9 @@ function mapPublicUser(row) {
 
 function translateRegistrationError(error) {
   if (error?.code === '23505') {
+    if (error.constraint?.startsWith('doctor_verifications')) {
+      throw new AppError(409, 'CREDENTIALS_IN_USE', 'These registration credentials cannot be submitted. Please check them or contact support.')
+    }
     throw new AppError(409, 'EMAIL_IN_USE', 'An account with this email already exists')
   }
 

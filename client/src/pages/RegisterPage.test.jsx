@@ -18,6 +18,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 const password = 'secure-password-123'
 const account = { fullName: 'Priya Sharma', email: 'priya@example.com', password, confirmPassword: password }
+const credentials = { registrationNumber: 'TEST-REG-2026', issuingAuthority: 'Test Medical Council' }
 const roots = []
 let frames
 
@@ -55,6 +56,7 @@ async function input(name, value) {
 }
 
 async function fill(values) {
+  if (values.qualification !== undefined) values = { ...credentials, ...values }
   for (const [name, value] of Object.entries(values)) await input(name, value)
 }
 
@@ -99,6 +101,24 @@ afterEach(async () => {
 })
 
 describe('Registration validation', () => {
+  it('requires medical credentials before continuing Doctor onboarding and rechecks corrections', async () => {
+    const host = await renderPage('doctor')
+    await fill({ ...account, qualification: 'MBBS', experienceYears: '5' })
+    await input('registrationNumber', '')
+    await input('issuingAuthority', '')
+    await submit(host)
+    expect(document.activeElement).toBe(field('registrationNumber'))
+    expect(error('registrationNumber')).not.toBeNull()
+    expect(error('issuingAuthority')).not.toBeNull()
+    await input('registrationNumber', 'x'.repeat(101))
+    expect(error('registrationNumber')).not.toBeNull()
+    await input('registrationNumber', credentials.registrationNumber)
+    await input('issuingAuthority', credentials.issuingAuthority)
+    await submit(host)
+    expect(field('specializationIds')).not.toBeNull()
+    expect(api.registerDoctorAccount).not.toHaveBeenCalled()
+  })
+
   it.each(['patient', 'doctor'])('starts the %s form without errors and labels every input', async role => {
     const host = await renderPage(role)
     expect(host.querySelector('[aria-invalid="true"]')).toBeNull()
@@ -133,7 +153,7 @@ describe('Registration validation', () => {
   it.each(['patient', 'doctor'])('shows one error per relevant field and focuses the first on empty %s submission', async role => {
     const host = await renderPage(role)
     await submit(host)
-    expect(host.querySelectorAll('.form-field-error')).toHaveLength(role === 'doctor' ? 6 : 4)
+    expect(host.querySelectorAll('.form-field-error')).toHaveLength(role === 'doctor' ? 8 : 4)
     expect(host.textContent).not.toContain('Please fix the following')
     expect(host.querySelector('[role="alert"]')).toBeNull()
     expect(document.activeElement).toBe(field('fullName'))
@@ -204,6 +224,7 @@ describe('Registration validation', () => {
     expect(api.registerDoctorAccount).toHaveBeenCalledExactlyOnceWith({
       fullName: account.fullName, email: account.email, password,
       qualification: 'MBBS, MD', experienceYears: 8, specializationIds: [1, 2],
+      ...credentials,
       bio: 'Patient-centred care', clinicName: 'Care Clinic', clinicCity: 'Delhi', clinicDistrict: 'Central', defaultFee: 700,
     })
     expect(host.textContent).toBe('?registered=doctor')
@@ -266,6 +287,7 @@ describe('Registration validation', () => {
     expect(register).toHaveBeenCalledTimes(1)
     expect(register.mock.calls[0][0]).toEqual(role === 'patient' ? payload : {
       ...payload, qualification: 'MBBS, MD', experienceYears: 8, specializationIds: [1],
+      ...credentials,
       bio: undefined, clinicName: undefined, clinicCity: undefined, clinicDistrict: undefined, defaultFee: undefined,
     })
     expect(form.getAttribute('aria-busy')).toBe('true')

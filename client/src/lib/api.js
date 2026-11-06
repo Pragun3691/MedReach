@@ -70,6 +70,34 @@ export function registerDoctorAccount(account) {
   })
 }
 
+async function verificationMutation(path, body) {
+  // Fetch from the current session for each action; login rotates the session.
+  const { csrfToken } = await requestJson('/api/auth/csrf')
+  return requestJson(path, {
+    method: 'POST', headers: { 'X-CSRF-Token': csrfToken }, body: JSON.stringify(body),
+  })
+}
+
+export function getMyVerification(signal) {
+  return requestJson('/api/doctors/me/verification', { signal })
+}
+
+export function submitMyVerification(input) {
+  return verificationMutation('/api/doctors/me/verification', input)
+}
+
+export function listDoctorVerifications({ status = 'pending', offset = 0, signal } = {}) {
+  return requestJson(`/api/admin/doctor-verifications?${new URLSearchParams({ status, offset, limit: 20 })}`, { signal })
+}
+
+export function getDoctorVerification(id, signal) {
+  return requestJson(`/api/admin/doctor-verifications/${id}`, { signal })
+}
+
+export function reviewDoctorVerification(id, decision, input) {
+  return verificationMutation(`/api/admin/doctor-verifications/${id}/${decision}`, input)
+}
+
 export function bookAppointment(slotId) {
   return requestJson('/api/appointments', {
     method: 'POST',

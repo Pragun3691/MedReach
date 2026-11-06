@@ -11,7 +11,7 @@ export function PublicFooter({ forceEnglish = false }) {
   const t = patientFacing ? languageState.t : (key, values) => translateMessage('en', key, values)
   const footerGroups = [
     { heading: t('footer.patients'), links: [{ label: t('navigation.findDoctors'), to: '/doctors' }, { label: t('footer.howItWorks'), to: '/#how-it-works' }, { label: t('navigation.login'), to: '/login' }] },
-    { heading: t('footer.forDoctors'), links: [{ label: t('auth.join'), to: '/register?role=doctor' }, { label: t('footer.doctorLogin'), to: '/login?role=doctor' }, { label: t('footer.verification'), to: '/doctor-verification' }] },
+    { heading: t('footer.forDoctors'), links: [{ label: t('auth.join'), to: '/register?role=doctor' }, { label: t('footer.doctorLogin'), to: '/login?role=doctor' }, { label: t('footer.verification'), to: '/doctor/verification' }] },
     { heading: 'MedReach', links: [{ label: t('footer.about'), to: '/about' }, { label: t('footer.privacy'), to: '/privacy' }, { label: t('footer.terms'), to: '/terms' }] },
   ]
   return (

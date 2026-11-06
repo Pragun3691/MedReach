@@ -4,10 +4,34 @@ import {
   deleteAvailabilityException,
   deleteAvailabilityExceptionRange,
   getAvailabilityExceptions,
+  submitMyVerification,
+  reviewDoctorVerification,
 } from './api.js'
 
 afterEach(() => {
   vi.unstubAllGlobals()
+})
+
+describe('verification CSRF API helpers', () => {
+  it.each(['doctor', 'admin'])('gets the current session token before a %s mutation', async role => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ csrfToken: 'session-token' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ verification: {} }), { status: 200 }))
+    vi.stubGlobal('fetch', fetch)
+    const body = role === 'doctor' ? { registrationNumber: 'REG', issuingAuthority: 'Council', version: 1 } : { version: 1, reason: 'Correction needed' }
+    await (role === 'doctor' ? submitMyVerification(body) : reviewDoctorVerification(7, 'reject', body))
+    expect(fetch.mock.calls[0][0]).toBe('/api/auth/csrf')
+    expect(fetch.mock.calls[1]).toEqual([
+      role === 'doctor' ? '/api/doctors/me/verification' : '/api/admin/doctor-verifications/7/reject',
+      expect.objectContaining({ method: 'POST', credentials: 'include', body: JSON.stringify(body), headers: expect.objectContaining({ 'X-CSRF-Token': 'session-token' }) }),
+    ])
+  })
+  it('does not mutate when token acquisition fails', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: 'AUTHENTICATION_REQUIRED' } }), { status: 401 }))
+    vi.stubGlobal('fetch', fetch)
+    await expect(reviewDoctorVerification(7, 'approve', { version: 1 })).rejects.toMatchObject({ status: 401 })
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('availability exception API helpers', () => {
