@@ -12,14 +12,24 @@ const api = vi.hoisted(() => ({
   beginAppointmentConsultation: vi.fn(), cancelAppointment: vi.fn(), getAppointment: vi.fn(),
   finishAppointmentConsultation: vi.fn(), getAppointmentConsultation: vi.fn(), getAppointmentVideoSession: vi.fn(), markAppointmentNoShow: vi.fn(), markAppointmentReady: vi.fn(), openAppointmentRoom: vi.fn(), saveAppointmentConsultation: vi.fn(),
 }))
+const meetingLifecycle = vi.hoisted(() => ({ mount: vi.fn(), unmount: vi.fn() }))
 vi.mock('../lib/api.js', () => api)
 vi.mock('../components/PublicHeader.jsx', () => ({ PublicHeader: () => null }))
 vi.mock('../components/PublicFooter.jsx', () => ({ PublicFooter: () => null }))
 vi.mock('../components/DeviceCheck.jsx', () => ({ DeviceCheck: () => <div>Device check ready</div> }))
 vi.mock('../components/DeviceCheckDialog.jsx', () => ({ DeviceCheckDialog: ({ onClose }) => <button onClick={onClose}>Close device check</button> }))
-vi.mock('../components/JaasMeeting.jsx', () => ({
-  JaasMeeting: props => <div data-testid="jaas-meeting"><button onClick={() => props.onLocalJoined?.({ id: 'local' })}>Simulate local join</button><button onClick={() => props.onParticipantJoined?.({ id: 'remote', userContext: { id: '1' } })}>Simulate patient join</button><button onClick={() => props.onConferenceLeft?.()}>Simulate conference leave</button></div>,
-}))
+vi.mock('../components/JaasMeeting.jsx', async () => {
+  const { useEffect } = await vi.importActual('react')
+  return {
+    JaasMeeting: props => {
+      useEffect(() => {
+        meetingLifecycle.mount()
+        return () => meetingLifecycle.unmount()
+      }, [])
+      return <div data-testid="jaas-meeting"><button onClick={() => props.onLocalJoined?.({ id: 'local' })}>Simulate local join</button><button onClick={() => props.onParticipantJoined?.({ id: 'remote', userContext: { id: '1' } })}>Simulate patient join</button><button onClick={() => props.onConferenceLeft?.()}>Simulate conference leave</button></div>
+    },
+  }
+})
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const patient = { id: 1, fullName: 'Ananya Rao', role: 'patient' }
@@ -54,6 +64,7 @@ beforeEach(() => {
   window.localStorage.clear()
   vi.useFakeTimers(); vi.setSystemTime('2030-01-01T09:56:00.000Z')
   Object.values(api).forEach(mock => mock.mockReset())
+  meetingLifecycle.mount.mockReset(); meetingLifecycle.unmount.mockReset()
   api.markAppointmentReady.mockResolvedValue({}); api.openAppointmentRoom.mockResolvedValue({}); api.beginAppointmentConsultation.mockResolvedValue({}); api.markAppointmentNoShow.mockResolvedValue({})
   api.finishAppointmentConsultation.mockResolvedValue({}); api.saveAppointmentConsultation.mockResolvedValue({})
   api.getAppointmentVideoSession.mockResolvedValue({ domain: '8x8.vc', roomName: 'test-app/medreach-appointment-42', jwt: 'memory-only-token', role: 'doctor' })
@@ -85,6 +96,47 @@ describe('Appointment pre-consultation experience', () => {
     await act(async () => root.unmount())
   })
 
+  it('covers Hindi Ready and Join controls without changing doctor or specialization source data', async () => {
+    window.localStorage.setItem('medreach.language', 'hi')
+    const open = appointment({ roomOpenedAt: '2030-01-01T09:55:00.000Z', canMarkReady: true })
+    const { host, root } = await renderPage(patient, [open])
+    expect(host.textContent).toContain('मैं तैयार हूँ')
+    expect(host.textContent).toContain('डॉक्टर से जुड़ें')
+    expect(host.textContent).toContain('जनरल मेडिसिन')
+    expect(host.textContent).toContain('Dr. Aditi Sharma')
+    await click(button(host, 'मैं तैयार हूँ'))
+    expect(api.markAppointmentReady).toHaveBeenCalledWith(42)
+    await click(button(host, 'डॉक्टर से जुड़ें'))
+    expect(host.textContent).toContain('कैमरा और माइक्रोफोन जाँचें')
+    await click([...host.querySelectorAll('button')].filter(item => item.textContent.includes('डॉक्टर से जुड़ें')).at(-1))
+    expect(api.getAppointmentVideoSession).toHaveBeenCalledWith(42)
+    await act(async () => root.unmount())
+  })
+
+  it('allows only one in-flight room authorization when Join is clicked repeatedly', async () => {
+    let resolveSession
+    api.getAppointmentVideoSession.mockReturnValue(new Promise(resolve => { resolveSession = resolve }))
+    const open = appointment({ roomOpenedAt: '2030-01-01T09:55:00.000Z', canMarkReady: true })
+    const { host, root } = await renderPage(patient, [open])
+    await click(button(host, 'Join consultation'))
+    const confirmJoin = [...host.querySelectorAll('button')].filter(item => item.textContent.includes('Join consultation')).at(-1)
+
+    await act(async () => {
+      confirmJoin.click()
+      confirmJoin.click()
+      await Promise.resolve()
+    })
+    expect(api.getAppointmentVideoSession).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      resolveSession({ domain: '8x8.vc', roomName: 'test-app/medreach-appointment-42', jwt: 'one-token', role: 'patient' })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(host.querySelectorAll('[data-testid="jaas-meeting"]')).toHaveLength(1)
+    await act(async () => root.unmount())
+  })
+
   it('shows a safe environment message when video authorization is not configured', async () => {
     const error = Object.assign(new Error('internal configuration detail'), { code: 'VIDEO_CONFIGURATION_UNAVAILABLE', status: 503 })
     api.getAppointmentVideoSession.mockRejectedValue(error)
@@ -113,7 +165,24 @@ describe('Appointment pre-consultation experience', () => {
     expect(api.getAppointment).toHaveBeenCalledTimes(2)
   })
 
+  it('polls for an opened room during the join window without requiring Patient Ready', async () => {
+    const unopened = appointment({ canMarkReady: true })
+    const opened = appointment({ roomOpenedAt: '2030-01-01T09:57:00.000Z', canMarkReady: true })
+    const { host, root } = await renderPage(patient, [unopened, opened])
+    expect(button(host, 'Join consultation')).toBeUndefined()
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000)
+      await Promise.resolve(); await Promise.resolve()
+    })
+
+    expect(button(host, 'Join consultation')).not.toBeUndefined()
+    expect(host.textContent).not.toContain('Youâ€™re checked in')
+    await act(async () => root.unmount())
+  })
+
   it('opens the room and shows Patient Waiting', async () => {
+    window.localStorage.setItem('medreach.language', 'hi')
     const initial = appointment({ readyAt: '2030-01-01T09:50:00.000Z', canOpenRoom: true, canReschedule: false })
     const opened = appointment({ readyAt: initial.consultationFlow.readyAt, roomOpenedAt: '2030-01-01T09:56:00.000Z', canBeginConsultation: true, canReschedule: false })
     const { host, root } = await renderPage(doctor, [initial, opened])
@@ -135,12 +204,46 @@ describe('Appointment pre-consultation experience', () => {
     const opened = appointment({ roomOpenedAt: '2030-01-01T09:55:00.000Z', canBeginConsultation: true, canReschedule: false })
     const { host, root } = await renderPage(doctor, [opened])
     await click(button(host, 'Enter consultation room')); await click([...host.querySelectorAll('button')].filter(item => item.textContent.includes('Join consultation')).at(-1))
-    await click(button(host, 'Simulate patient join')); expect(host.textContent).toContain('Patient connected')
+    expect(host.textContent).toContain('Connecting to consultation room')
+    await click(button(host, 'Simulate patient join')); expect(host.textContent).toContain('Patient connected'); expect(host.textContent).toContain('Connecting to consultation room')
+    await click(button(host, 'Simulate local join')); expect(host.textContent).toContain('Connected to consultation room')
     await click(button(host, 'Begin consultation')); expect(api.beginAppointmentConsultation).not.toHaveBeenCalled()
     expect(host.textContent).toContain('This starts the MedReach consultation record')
     await click([...host.querySelectorAll('button')].filter(item => item.textContent.includes('Begin consultation')).at(-1))
     expect(api.beginAppointmentConsultation).toHaveBeenCalledWith(42)
     await act(async () => root.unmount())
+  })
+
+  it('keeps the existing meeting mounted while Begin refetches and activates the clinical workspace', async () => {
+    let resolveRefresh
+    const opened = appointment({ roomOpenedAt: '2030-01-01T09:55:00.000Z', canBeginConsultation: true, canReschedule: false })
+    const active = appointment({ roomOpenedAt: opened.consultationFlow.roomOpenedAt, consultationId: 9000, consultationStartedAt: '2030-01-01T09:56:00.000Z', canCancel: false, canReschedule: false })
+    api.getAppointmentConsultation.mockResolvedValue({ consultation: { consultationId: 9000, startedAt: active.consultationFlow.consultationStartedAt, finishedAt: null, notes: '', prescriptionItems: [], followUp: null, editable: true } })
+    const { host, root } = await renderPage(doctor, [opened])
+    await click(button(host, 'Enter consultation room')); await click([...host.querySelectorAll('button')].filter(item => item.textContent.includes('Join consultation')).at(-1))
+    const meeting = host.querySelector('[data-testid="jaas-meeting"]')
+    api.getAppointment.mockReturnValueOnce(new Promise(resolve => { resolveRefresh = resolve }))
+
+    await click(button(host, 'Begin consultation'))
+    await click([...host.querySelectorAll('button')].filter(item => item.textContent.includes('Begin consultation')).at(-1))
+
+    expect(api.beginAppointmentConsultation).toHaveBeenCalledWith(42)
+    expect(api.getAppointmentVideoSession).toHaveBeenCalledTimes(1)
+    expect(host.querySelector('[data-testid="jaas-meeting"]')).toBe(meeting)
+    expect(meetingLifecycle.mount).toHaveBeenCalledTimes(1)
+    expect(meetingLifecycle.unmount).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveRefresh({ appointment: active })
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+    })
+    expect(host.querySelector('[data-testid="jaas-meeting"]')).toBe(meeting)
+    expect(meetingLifecycle.mount).toHaveBeenCalledTimes(1)
+    expect(meetingLifecycle.unmount).not.toHaveBeenCalled()
+    expect(api.getAppointmentVideoSession).toHaveBeenCalledTimes(1)
+    expect(host.textContent).toContain('Clinical workspace')
+    await act(async () => root.unmount())
+    expect(meetingLifecycle.unmount).toHaveBeenCalledTimes(1)
   })
 
   it('warns about Ready before no-show and leaving JaaS does not begin or finish clinical state', async () => {
@@ -172,6 +275,28 @@ describe('Appointment pre-consultation experience', () => {
     expect(host.textContent).toContain('Completed guidance')
     expect(button(host, 'Join consultation')).toBeUndefined()
     expect(button(host, 'Save changes')).toBeUndefined()
+    await act(async () => root.unmount())
+  })
+
+  it('polls an active Patient into the completed record and closes the finished meeting', async () => {
+    const active = appointment({ roomOpenedAt: '2030-01-01T09:55:00.000Z', consultationId: 9000, consultationStartedAt: '2030-01-01T09:56:00.000Z', canCancel: false, canReschedule: false })
+    const completed = appointment({ roomOpenedAt: active.consultationFlow.roomOpenedAt, consultationId: 9000, consultationStartedAt: active.consultationFlow.consultationStartedAt, consultationFinishedAt: '2030-01-01T10:30:00.000Z', canCancel: false, canReschedule: false }, 'completed')
+    api.getAppointmentConsultation.mockResolvedValue({ consultation: { consultationId: 9000, startedAt: active.consultationFlow.consultationStartedAt, finishedAt: completed.consultationFlow.consultationFinishedAt, notes: 'Completed guidance', prescriptionItems: [], followUp: null, editable: false } })
+    const { host, root } = await renderPage(patient, [active, completed])
+    await click(button(host, 'Join consultation')); await click([...host.querySelectorAll('button')].filter(item => item.textContent.includes('Join consultation')).at(-1))
+    expect(host.querySelector('[data-testid="jaas-meeting"]')).not.toBeNull()
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000)
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+    })
+
+    expect(api.getAppointment).toHaveBeenCalledTimes(2)
+    expect(host.querySelector('[data-testid="jaas-meeting"]')).toBeNull()
+    expect(meetingLifecycle.unmount).toHaveBeenCalledTimes(1)
+    expect(button(host, 'Join consultation')).toBeUndefined()
+    expect(host.textContent).not.toContain('Consultation in progress')
+    expect(host.textContent).toContain('Completed guidance')
     await act(async () => root.unmount())
   })
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from 'react'
+import { act, createElement, StrictMode, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { JaasMeeting } from '../components/JaasMeeting.jsx'
@@ -96,8 +96,10 @@ describe('JaaS iframe integration', () => {
     })
     expect(constructorArguments.options).not.toHaveProperty('privateKey')
 
-    listeners.get('videoConferenceJoined')({ id: 'local-id' })
+    expect(callbacks.onLocalJoined).not.toHaveBeenCalled()
     listeners.get('participantJoined')({ id: 'jitsi-id', userContext: { id: '10' } })
+    expect(callbacks.onLocalJoined).not.toHaveBeenCalled()
+    listeners.get('videoConferenceJoined')({ id: 'local-id' })
     listeners.get('participantLeft')({ id: 'jitsi-id' })
     listeners.get('videoConferenceLeft')({ roomName: session.roomName })
     listeners.get('readyToClose')()
@@ -118,6 +120,72 @@ describe('JaaS iframe integration', () => {
     expect(removeEventListener).toHaveBeenCalledTimes(9)
     expect(listeners.size).toBe(0)
     expect(dispose).toHaveBeenCalledOnce()
+    host.remove()
+  })
+
+  it('keeps one API instance through StrictMode and callback-driven state updates', async () => {
+    const instances = []
+    class ExternalApi {
+      constructor() {
+        this.listeners = new Map()
+        this.dispose = vi.fn()
+        instances.push(this)
+      }
+
+      addEventListener(name, callback) {
+        this.listeners.set(name, callback)
+      }
+
+      removeEventListener(name, callback) {
+        if (this.listeners.get(name) === callback) this.listeners.delete(name)
+      }
+    }
+
+    let resolveExternalApi
+    const loadExternalApi = vi.fn(() => new Promise(resolve => { resolveExternalApi = resolve }))
+    const session = {
+      domain: '8x8.vc',
+      roomName: 'test-app-three/medreach-appointment-9',
+      jwt: 'strict-mode-test-token',
+    }
+    function Harness() {
+      const [updates, setUpdates] = useState(0)
+      return <><span data-testid="updates">{updates}</span><JaasMeeting
+        loadExternalApi={loadExternalApi}
+        onParticipantJoined={() => setUpdates(value => value + 1)}
+        session={session}
+      /></>
+    }
+
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    await act(async () => {
+      root.render(<StrictMode><Harness /></StrictMode>)
+      await Promise.resolve()
+    })
+    expect(loadExternalApi).toHaveBeenCalledOnce()
+
+    await act(async () => {
+      resolveExternalApi(ExternalApi)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(instances).toHaveLength(1)
+
+    await act(async () => {
+      instances[0].listeners.get('participantJoined')({ id: 'one' })
+      instances[0].listeners.get('participantJoined')({ id: 'two' })
+      instances[0].listeners.get('participantJoined')({ id: 'three' })
+    })
+    expect(host.querySelector('[data-testid="updates"]').textContent).toBe('3')
+    expect(loadExternalApi).toHaveBeenCalledOnce()
+    expect(instances).toHaveLength(1)
+    expect(instances[0].dispose).not.toHaveBeenCalled()
+
+    await act(async () => root.unmount())
+    expect(instances[0].dispose).toHaveBeenCalledOnce()
+    expect(instances[0].listeners.size).toBe(0)
     host.remove()
   })
 })
