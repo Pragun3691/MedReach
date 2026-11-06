@@ -46,7 +46,9 @@ describe('production frontend serving', () => {
   it.each([
     '/', '/doctors', '/doctors/1?date=2026-10-08', '/login', '/register',
     '/appointments', '/appointments/1', '/doctor/appointments', '/doctor/availability',
-    '/notifications', '/doctors/',
+    '/notifications', '/doctors/', '/doctor/verification', '/admin/doctor-verifications',
+    '/doctor/verification/', '/admin/doctor-verifications/',
+    '/doctor/verification?returnTo=availability', '/admin/doctor-verifications?status=pending',
   ])('serves the React shell for HTML navigation to %s', async pathname => {
     const response = await request(app).get(pathname)
       .set('Accept', 'text/html').set('Sec-Fetch-Mode', 'navigate').set('Sec-Fetch-Dest', 'document')
@@ -88,7 +90,7 @@ describe('production frontend serving', () => {
     expect(doctors.search).not.toHaveBeenCalled()
   })
 
-  it.each(['/api', '/api/unknown', '/API/unknown', '/api/unknown/'])('keeps %s a JSON API 404, even with a matching fixture file', async pathname => {
+  it.each(['/api', '/api/unknown', '/API/unknown', '/api/unknown/', '/api/doctor/verification', '/api/admin/unknown'])('keeps %s a JSON API 404, even with a matching fixture file', async pathname => {
     const response = await request(app).get(pathname).set('Accept', 'text/html')
     expect(response.status).toBe(404)
     expect(response.type).toBe('application/json')

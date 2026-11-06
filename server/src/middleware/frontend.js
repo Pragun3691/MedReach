@@ -8,7 +8,8 @@ const pageRoutes = [
   /^\/$/,
   /^\/(?:doctors|login|register|appointments|notifications)\/?$/i,
   /^\/(?:doctors|appointments)\/[^/.\\]+\/?$/i,
-  /^\/doctor\/(?:appointments|availability)\/?$/i,
+  /^\/doctor\/(?:appointments|availability|verification)\/?$/i,
+  /^\/admin\/doctor-verifications\/?$/i,
 ]
 
 export function createFrontendRouter(directory = frontendDirectory) {
