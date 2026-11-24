@@ -1,274 +1,175 @@
 # MedReach
 
-MedReach is a full-stack healthcare discovery and remote-consultation project.
-The current implementation includes public doctor discovery, secure Patient and
-Doctor authentication, real appointment booking and slot reservation,
-appointment lists and details, Patient and Doctor cancellation, Patient
-rescheduling, and stored in-app notifications.
+MedReach is a full-stack healthcare discovery and remote-consultation project. Patients can find doctors, book appointments, and use supported consultation and follow-up features. Doctors manage availability, appointments, verification submissions, and consultation records. Admin functionality is currently focused on doctor verification.
 
-## Project structure
+This repository contains a React frontend and an Express API backed by PostgreSQL. The application is designed to serve the built frontend and API from one Node.js process in production.
 
-- `client/` — React, Vite, Tailwind CSS and React Router
-- `server/` — Express REST API and PostgreSQL data access
+## Project structure and technology
+
+- `client/` — React 19, Vite, React Router 7, and Tailwind CSS 4 frontend.
+- `server/` — Node.js ES modules, Express 5 API, PostgreSQL access through `pg`, and migrations managed by `node-pg-migrate`.
+- `server/migrations/` — ordered PostgreSQL schema migrations.
+- `server/scripts/` — migration, bootstrap, seed, and schema verification commands.
+- `docs/doctor-verification.md` — doctor verification design, API, migration, local validation guidance, and explicit Admin bootstrap procedure.
+
+Authentication uses `express-session` with PostgreSQL-backed sessions and Argon2id password hashing. The API uses role and ownership checks. Video consultation is integrated with JaaS through server-issued short-lived tokens; it requires JaaS credentials and has not been verified against a live provider as part of this documentation update.
+
+## Project documentation
+
+- [Architecture](docs/ARCHITECTURE.md) — frontend/API/database flow, authentication, and lifecycle overview.
+- [Database and migrations](docs/DATABASE.md) — schema relationships, migration order, and database safety notes.
+- [API reference](docs/API.md) — route inventory, access rules, and validation notes.
+- [Testing](docs/TESTING.md) — package commands, test organization, and safe database-test guidance.
+- [Doctor verification](docs/doctor-verification.md) — verification workflow, Admin bootstrap, and its historical validation notes.
+
+## Prerequisites
+
+- Node.js 22.12 or later in the 22.x line, or Node.js 24.0 or later. These versions are named in the existing deployment guidance; package manifests do not declare an `engines` field.
+- npm compatible with the installed Node.js version.
+- A local PostgreSQL database for migrations and database-backed application features.
+- Git, if obtaining or updating the source checkout.
+
+## Local setup
+
+From the repository root:
+
+1. Install the locked client and server dependencies:
+
+   ```bash
+   npm run install:deps
+   ```
+
+2. Copy `server/.env.example` to `server/.env`. Configure the local database connection and a `SESSION_SECRET` of at least 32 characters. Keep real credentials out of source control and chat. The server reads this file for local start and migration commands.
+
+3. Apply local development migrations:
+
+   ```bash
+   npm --prefix server run migrate:up
+   ```
+
+   This uses the local server environment and applies pending upward migrations. The current repository contains ten migration files. Never point local setup commands at a production database.
+
+4. Optional: add fictional public discovery data to a disposable development database:
+
+   ```bash
+   npm run seed
+   ```
+
+   The seed is prohibited in production. Seeded doctors have non-login placeholder hashes; they are discovery fixtures, not usable Doctor accounts. The script also creates a development Admin row with a non-login placeholder hash.
+
+5. Start the API and frontend in separate terminals from the repository root:
+
+   ```bash
+   npm run dev:server
+   ```
+
+   ```bash
+   npm run dev:client
+   ```
+
+   Vite proxies `/api` requests to the local API at `127.0.0.1:3000` (`client/vite.config.js`). The server port can be set with `PORT`.
+
+## Environment variable names
+
+The server recognizes these names; values belong in the local environment or deployment secret store, never in this document or client bundle:
+
+- `NODE_ENV`
+- `PORT`
+- `DATABASE_URL`
+- `DATABASE_SSL`
+- `DATABASE_SSL_CA` (optional custom CA certificate)
+- `SESSION_SECRET`
+- `JAAS_APP_ID`
+- `JAAS_API_KEY_ID`
+- `JAAS_PRIVATE_KEY_BASE64`
+- `JAAS_TOKEN_TTL_SECONDS` (optional)
+
+`DATABASE_URL` is needed for database operations. The application requires `SESSION_SECRET` outside tests. External production PostgreSQL connections require verified TLS using `DATABASE_SSL`; `DATABASE_SSL_CA` is optional when a custom CA is required. JaaS variables are needed only for video authorization. See `server/.env.example` and `server/src/config/env.js` for the current names and validation.
+
+`DATABASE_URL` must not include TLS/connection override query parameters. The database configuration rejects `ssl`, `sslmode`, `sslcert`, `sslkey`, `sslrootcert`, `sslnegotiation`, `uselibpqcompat`, and `host`. Configure TLS with `DATABASE_SSL` (`true` or `false`) and, when a private CA is needed, `DATABASE_SSL_CA`; a CA value is accepted only when TLS is enabled. External production database connections require verified TLS, so use `DATABASE_SSL` accordingly. Do not weaken certificate verification to work around connection errors.
 
 ## Development commands
 
-Run these commands from the repository root:
+These commands are defined by the root and package manifests:
 
-```bash
-npm run dev:client
-npm run dev:server
-npm run build
-npm run lint
-npm test
-```
+| Task | Command |
+|---|---|
+| Install client and server dependencies from lockfiles | `npm run install:deps` |
+| Run frontend development server | `npm run dev:client` |
+| Run API development server | `npm run dev:server` |
+| Build frontend | `npm run build` |
+| Lint frontend and server | `npm run lint` |
+| Run server and client test suites | `npm test` |
+| Apply local upward migrations | `npm --prefix server run migrate:up` |
+| Verify booking schema against configured database | `npm --prefix server run verify:booking-schema` |
 
-Copy `server/.env.example` to `server/.env` and set `DATABASE_URL` before
-running migrations. Set a cryptographically random `SESSION_SECRET` of at least
-32 characters for sessions.
+Database integration tests require a disposable PostgreSQL database configured for the test run; without `DATABASE_URL`, some database tests are skipped. Do not use production data for development or test fixtures. These commands are available in the repository; their results are not asserted here.
 
-```bash
-npm --prefix server run migrate:up
-npm --prefix server run verify:booking-schema
-```
+## Architecture overview
 
-The booking milestone is created by
-`server/migrations/1788175400000_create-appointment-booking-schema.js`. The
-verification command checks the appointment and notification tables,
-constraints, indexes and preserved discovery-data row counts without resetting
-or reseeding the database.
+The browser frontend calls JSON endpoints on the Express API. During local development Vite proxies `/api` to Express. In production, Express serves both the API and generated `client/dist` assets (`server/src/app.js`, `server/src/middleware/frontend.js`).
 
-After migrating a development database, run `npm run seed` once to add
-fictional doctors, specializations, availability blocks and 30-minute slots.
-These seeded doctors exist only as public discovery data. They do not have
-usable login credentials and are not Doctor login accounts.
+The API is organized around routes, controllers, services, and PostgreSQL data-access modules under `server/src/`. PostgreSQL stores accounts, profiles, verification, availability, appointments, notifications, consultation records, and sessions. Migrations under `server/migrations/` define the schema. Authentication uses a `medreach.sid` HttpOnly cookie and PostgreSQL session storage. Authorization checks roles and record ownership or assignment.
+
+The main frontend routes are defined in `client/src/App.jsx`; API routers are mounted in `server/src/app.js`. Keep the production frontend page fallback in `server/src/middleware/frontend.js` aligned when routes change.
+
+## API overview
+
+All routes are under `/api`. The route definitions are the source of truth; this overview is not a complete request/response reference.
+
+- Health: `GET /api/health`
+- Public discovery: `GET /api/specializations`, `GET /api/doctors`, `GET /api/doctors/:doctorId`, `GET /api/doctors/:doctorId/slots`
+- Authentication: patient and doctor registration, login, logout, session identity, and CSRF token endpoints under `/api/auth`
+- Doctor verification: doctor submission/status under `/api/doctors/me/verification`; Admin review under `/api/admin/doctor-verifications`
+- Availability: Doctor-owned availability blocks, recurring rules, and exceptions under `/api/doctors/me/availability`
+- Appointments and consultations: booking, lists, details, cancellation, patient rescheduling, consultation lifecycle, clinical workspace, and video authorization under `/api/appointments`; Doctor appointment list under `/api/doctors/me/appointments`
+- Notifications: list and mark read under `/api/notifications`
+
+For verification states, review roles, migration details, and the documented Admin bootstrap procedure, see [Doctor verification](docs/doctor-verification.md).
+
+## Feature status
+
+These statuses describe code found in this repository, not production readiness. **No feature below is verified in a running deployed environment by this README.**
+
+| Status | Features |
+|---|---|
+| Implemented in code | Patient and Doctor registration/login; public doctor search; Doctor availability and recurring rules/exceptions; appointment booking, cancellation, and patient rescheduling; Admin doctor verification; in-app notifications; consultation lifecycle; Doctor notes and structured prescriptions; optional follow-up recommendation and patient view of a finished consultation record. |
+| Partial | JaaS video integration (requires configured credentials and live-provider validation); medical records (limited to finished MedReach consultation notes, prescriptions, and follow-up details); administration (currently focused on doctor verification and Admin account bootstrap). |
+| Not implemented | Email/SMS notifications; patient uploads; polished history-sharing/consent UI; follow-up progress notes; payments; reviews; marketplace/content extras; AI medical functionality; automated medical-license verification or registry integration. |
+| Not verified in a running environment | Deployment behavior, live video calls, production database state, and end-to-end feature behavior. Passing tests alone does not establish production functionality. |
+
+Doctor verification approval is a human decision; submitted credentials are not independently validated by an external registry. The Admin review UI does not grant access to clinical records. The bootstrap command and local validation instructions are documented in [docs/doctor-verification.md](docs/doctor-verification.md).
+
+### Important behavior and limits
+
+- Public discovery exposes only enabled Doctors with approved verification. Search supports name, specialization, problem, date, fee, and experience filters. Booked slots are excluded from public availability.
+- Booking and patient rescheduling use database transactions and slot locks to prevent competing active bookings from taking the same slot. Patient check-in opens 15 minutes before a slot; a Doctor can open the room from five minutes before the slot. No-show is a manual Doctor action from 15 minutes after the start, with no upper time limit. Patient cancellation and rescheduling close at that 15-minute-after-start boundary and are unavailable after a consultation begins.
+- A consultation begins only through the Doctor workflow and may continue after the scheduled slot ends until the Doctor explicitly finishes it. Finishing marks the appointment completed.
+- The Doctor's clinical draft contains plain-text notes, structured prescription items, and an optional follow-up interval. Drafts are explicitly saved, not autosaved. Patients can read the record only after the consultation is finished; the Admin verification workflow has no clinical-record access.
+- Video uses JaaS at `8x8.vc`. The server authorizes the assigned Doctor or owning Patient and signs a short-lived token; the browser does not receive the private signing key. Valid JaaS environment variables are required for live video. Leaving the video room does not finish the MedReach consultation.
+- Notifications are in-app stored messages. Email and SMS delivery are not implemented.
 
 ## Production serving
 
-From the repository root, install with the existing client and server lockfiles,
-then build the frontend:
+The production server serves the API and built frontend from one Express process. The package scripts provide:
 
 ```bash
-npm run install:deps
-npm run build
+npm run install:deps && npm run build
+npm start
 ```
 
-Set `NODE_ENV=production` in the server environment and run `npm start` from the
-repository root. In PowerShell, use `$env:NODE_ENV = 'production'` before
-`npm start`. The existing server environment loader also supports `server/.env`.
-The server listens on `PORT` (default 3000) using one Express process for both
-the API and generated `client/dist` files. The Vite server remains development-only.
+Configure production environment variables in the hosting provider. Keep `server/migrations/`, `server/scripts/`, server production dependencies, and generated `client/dist` available to the service. Do not run migrations during the frontend build or on every web-process startup. The production migration command is `npm run migrate:production`; it uses injected environment variables, applies pending upward migrations, and refuses production down migrations. Review the migration files and deployment plan before running it.
 
-API routes run first; unknown `/api` endpoints retain the JSON 404 response.
-GET/HEAD HTML navigation to the page routes declared in `client/src/App.jsx`
-receives `index.html`, including direct links such as `/doctors/1` and
-`/doctor/availability`. Keep the page patterns in
-`server/src/middleware/frontend.js` aligned when adding frontend routes.
-Missing assets, unsupported methods and unknown page paths receive 404 responses.
-Only `client/dist` is a static file root; dotfiles are ignored.
+## Planned Render + Neon deployment
 
-Production still requires a random `SESSION_SECRET` of at least 32 characters,
-`DATABASE_URL` and a prepared PostgreSQL schema including `user_sessions`.
-Use HTTPS behind the existing trusted proxy; production session cookies remain
-Secure, HttpOnly and SameSite=Lax. Keep database, session and JaaS credentials
-in the server environment; do not place them in Vite variables or frontend files.
-Dependency and build output are ignored by Git.
+**Planned, not live or verified:** the intended deployment is a Render web service at `medreach.onrender.com` backed by Neon PostgreSQL. This repository contains no Render service configuration and does not confirm that the hostname is reserved, the service is created, or the database is provisioned.
 
-## Production PostgreSQL and Railway pre-deploy
+The repository provides candidate commands, not verified Render settings:
 
-Use Node 22.12+ (or Node 24.0+). From the repository root, the build command is
-`npm run install:deps && npm run build`; the start command is `npm start`.
-The install script explicitly includes development dependencies needed to build
-React even when `NODE_ENV=production`. `node-pg-migrate` is a server production
-dependency at the existing locked version, so it also survives
-`npm --prefix server ci --omit=dev` or pruning server development dependencies.
-Keep `server/migrations`, `server/scripts`, `server/src`, server production
-dependencies and generated `client/dist` in the final image. Do not run migrations
-during the frontend build or on every web-process startup.
+- Build: `npm run install:deps && npm run build`
+- Start: `npm start`
+- Upward migration command: `npm run migrate:production`, run as a separately reviewed deployment step before serving code that depends on the new schema.
 
-Configure the application service's Railway **Pre-Deploy Command** as:
+Before deployment, confirm Render's supported migration/pre-deploy workflow for the selected service, Node runtime, health check, and environment configuration. These settings are not established by repository files. Neon connection details must be supplied securely through the hosting environment; external production connections require verified TLS (`DATABASE_SSL`). Do not paste connection strings or secrets into documentation, commits, logs, or the frontend. Never run development seeds against Neon production.
 
-```bash
-npm run migrate:production
-```
-
-This root command forwards to `npm --prefix server run migrate:production`.
-It uses platform-injected variables and never loads a local `.env`. Railway runs
-pre-deploy commands inside the private network with service variables; a nonzero
-exit blocks deployment. See [Railway pre-deploy documentation](https://docs.railway.com/deployments/pre-deploy-command).
-The command validates connection settings, requires packaged migration files,
-applies every pending upward migration under the migration lock and a single
-transaction, and retains the existing `public.pgmigrations` history table.
-Missing configuration, TLS failures, unavailable files or migration errors exit
-nonzero. An already-current schema reports zero applied migrations explicitly.
-The command emits safe summaries rather than raw database errors or SQL.
-
-Required server variables are `NODE_ENV=production`, `DATABASE_URL`,
-`DATABASE_SSL` (choose `false` or `true`) and `SESSION_SECRET` (at least 32 random
-characters). Railway supplies `PORT`; the existing default is 3000. Migrations
-require `DATABASE_URL` and connection/TLS settings, but not a session secret.
-Video credentials remain server-only `JAAS_APP_ID`, `JAAS_API_KEY_ID`,
-`JAAS_PRIVATE_KEY_BASE64` and optional `JAAS_TOKEN_TTL_SECONDS`.
-
-For Railway private networking, reference the database service's private
-`DATABASE_URL` (hostname ending in `.railway.internal`) and set
-`DATABASE_SSL=false`. This explicitly disables PostgreSQL TLS over Railway's
-encrypted private network. Local PostgreSQL remains compatible with
-`DATABASE_SSL=false`. Production connections to other hostnames require
-`DATABASE_SSL=true`; use a hostname matching the server certificate.
-
-External TLS always verifies the certificate chain and hostname. Publicly trusted
-certificates use Node's trust store. For a private CA, optionally set
-`DATABASE_SSL_CA` to its PEM certificate (actual multiline contents). Application
-queries, PostgreSQL sessions and migrations use the same settings. Certificate
-failures must be fixed with a valid certificate/CA, never by disabling verification.
-Remove `ssl`, `sslmode`, `sslcert`, `sslkey`, `sslrootcert`, `sslnegotiation`,
-`uselibpqcompat` and `host` query parameters from `DATABASE_URL`; configuration
-rejects these because pg URL parameters can override explicit TLS settings.
-See [node-postgres TLS documentation](https://node-postgres.com/features/ssl).
-
-Local `npm --prefix server run migrate:up` and `migrate:down` still load
-`server/.env` when present; injected variables take precedence and an absent file
-is allowed. Downward migrations are refused with `NODE_ENV=production`.
-**Never run `npm run seed` or `seed:public-discovery` in production.** Pre-deploy
-must use only the upward migration command, never seeds, resets or rollback commands.
-No database has been provisioned or migrated as part of this configuration change.
-
-## Public discovery API
-
-- `GET /api/specializations`
-- `GET /api/doctors`
-- `GET /api/doctors/:doctorId`
-- `GET /api/doctors/:doctorId/slots?date=YYYY-MM-DD`
-
-Doctor search accepts `name`, `specialization`, `problem`, `date`, `maxFee`,
-`minExperience`, `limit` and `offset`. Only approved, enabled Doctor profiles
-are returned publicly. Active slots with a booked appointment are excluded
-from public availability.
-
-## Authentication API
-
-- `POST /api/auth/register/patient`
-- `POST /api/auth/register/doctor`
-- `POST /api/auth/login`
-- `POST /api/auth/logout`
-- `GET /api/auth/me`
-
-Passwords are hashed with Argon2id. Authentication uses an HttpOnly
-`medreach.sid` cookie and PostgreSQL `user_sessions` storage. Newly registered
-Doctor profiles remain private until their verification is approved.
-
-## Appointment API
-
-- `POST /api/appointments` — Patient books an available slot
-- `GET /api/appointments/me` — Patient lists their appointments
-- `GET /api/appointments/:appointmentId` — owning Patient or assigned Doctor gets safe details
-- `POST /api/appointments/:appointmentId/cancel` — owning Patient or assigned Doctor cancels
-- `POST /api/appointments/:appointmentId/reschedule` — owning Patient reschedules
-- `POST /api/appointments/:appointmentId/ready` — owning Patient marks Ready from T-15 until slot end
-- `POST /api/appointments/:appointmentId/open-room` — assigned Doctor opens the room from T-5 until slot end
-- `POST /api/appointments/:appointmentId/begin-consultation` — assigned Doctor begins the clinical encounter after opening the room
-- `GET /api/appointments/:appointmentId/consultation` — assigned Doctor reads active/finished content; owning Patient reads only completed content
-- `PATCH /api/appointments/:appointmentId/consultation` — assigned Doctor transactionally saves an active clinical draft
-- `POST /api/appointments/:appointmentId/no-show` — assigned Doctor manually records no-show from T+15 onward
-- `POST /api/appointments/:appointmentId/consultation/finish` — assigned Doctor finishes an active consultation
-- `POST /api/appointments/:appointmentId/video-token` — owning Patient or assigned Doctor obtains short-lived JaaS join authorization
-- `GET /api/doctors/me/appointments` — Doctor lists assigned appointments
-
-Booking and rescheduling are transactional. PostgreSQL row locks and a partial
-unique index prevent two active bookings from owning the same slot. Doctor and
-appointment time remain derived through the selected slot and availability
-block rather than being duplicated on the appointment record.
-
-## Notification API
-
-- `GET /api/notifications?limit=20&offset=0`
-- `PATCH /api/notifications/:notificationId/read`
-
-Notifications are stored message snapshots with backend-generated internal
-action paths. Authenticated users can list and mark only their own notifications.
-
-## Consultation lifecycle foundation
-
-Patients can mark Ready from 15 minutes before the scheduled start until the
-30-minute slot ends. Assigned Doctors can open a room and begin the clinical
-encounter from five minutes before the start until slot end; opening a room is
-separate from beginning a Consultation. A Patient Ready signal is not required
-to begin. Exactly one Consultation may exist per appointment, and an active
-Consultation may continue beyond slot end until the assigned Doctor explicitly
-finishes it, atomically moving the appointment to `completed`.
-
-No-show is a manual assigned-Doctor action available from 15 minutes after the
-scheduled start with no upper time limit. It is never automatic. Patient
-self-cancellation and rescheduling close at that same T+15 boundary and are
-blocked once a Consultation begins.
-
-## JaaS integration foundation
-
-MedReach uses the JaaS deployment at `8x8.vc` through its IFrame API. The
-Express backend authorizes the owning Patient or assigned Doctor against the
-current locked appointment and Consultation state, then signs a short-lived
-RS256 JWT. Doctors receive moderator permission and Patients receive ordinary
-participant permission. Tokens use a literal, stable room named
-`medreach-appointment-<appointmentId>` and the IFrame receives the full
-`<AppID>/<room>` name. The browser never chooses the room and never receives
-the private signing key.
-
-Configure real development credentials only in `server/.env` using
-`JAAS_APP_ID`, `JAAS_API_KEY_ID`, `JAAS_PRIVATE_KEY_BASE64`, and optionally
-`JAAS_TOKEN_TTL_SECONDS` (default 600 seconds). The Base64-encoded PEM RSA
-private key may use PKCS#8 (`BEGIN PRIVATE KEY`) or legacy PKCS#1
-(`BEGIN RSA PRIVATE KEY`) format. It is decoded and parsed only by the server
-when video authorization is first requested.
-
-The reusable `JaasMeeting` component loads
-`https://8x8.vc/<AppID>/external_api.js` once, limits the built-in toolbar to
-microphone, camera, and hangup, exposes participant and local media events, and
-disposes the IFrame API on unmount. Active Consultations can request fresh
-tokens after slot end for reconnects. Leaving or hanging up never finishes a
-MedReach Consultation.
-
-Appointment Details now presents the pre-consultation workflow from the
-backend-derived lifecycle capabilities: Patient check-in and waiting, Doctor
-room opening, a compact browser-only camera/microphone check, authorized room
-entry, participant-presence feedback, explicit Doctor confirmation before
-beginning the Consultation, and manual no-show confirmation.
-
-## Active consultation clinical workspace
-
-After the assigned Doctor explicitly begins a Consultation, Appointment Details
-provides the active video experience alongside a compact clinical workspace.
-The Doctor can explicitly save plain consultation notes, zero or more structured
-prescription items, and one optional follow-up interval. Draft saving replaces
-the complete clinical draft transactionally while the Consultation remains
-active; it does not autosave or use browser storage.
-
-The existing Finish endpoint remains the only completion mechanism. Unsaved
-changes are saved before Finish, and a failed save prevents completion. Finish
-atomically sets `consultations.finished_at`, moves the appointment to
-`completed`, and derives any follow-up target from that completion timestamp.
-The assigned Doctor can revisit the resulting clinical record read-only.
-Patients continue to receive only the active consultation/video experience;
-unfinished Doctor clinical content is not exposed to Patient or Admin accounts.
-
-## Patient post-consultation record
-
-An owning Patient can open a completed appointment and read its finished
-Consultation record. Appointment Details presents the Doctor’s plain-text notes,
-the structured prescription in stored order, and the optional follow-up interval
-and server-derived target date. Empty notes, prescription, and follow-up states
-are explained calmly only when a real finished Consultation exists.
-
-When follow-up was recommended, the record links to the same Doctor’s existing
-availability flow with the target calendar date preselected. This remains a
-normal Patient-selected booking: MedReach does not create a follow-up
-appointment or reserve a slot automatically. Active clinical drafts remain
-private to the assigned Doctor, PATCH and Finish remain Doctor-only, and Admin
-accounts have no clinical access.
-
-## Known exclusions
-
-This milestone does not implement the polished Patient post-consultation
-history-sharing/consent UI, follow-up progress notes, patient uploads,
-marketplace or content extras, payments, reviews, AI medical functionality,
-administration tools, or email/SMS notifications.
+The older Railway-specific guidance has been removed because it does not describe the planned Render + Neon target. Actual deployment settings, successful migrations, and the live status of `medreach.onrender.com` remain unverified.

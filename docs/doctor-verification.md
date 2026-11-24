@@ -1,6 +1,6 @@
 # Doctor verification implementation and local validation
 
-This change is based on reviewed commit `4317579050e228b4f499938242e8aaf1f4b21c4c`, on branch `feat/admin-doctor-verification`. It preserves the registration validation UX. The registration review patch is intentionally untracked and is not part of this change.
+This change is based on reviewed commit `4317579050e228b4f499938242e8aaf1f4b21c4c`, on branch `feat/admin-doctor-verification`. It preserves the registration validation UX. The note that a registration review patch was untracked records the worktree state at the time this document was written; it is historical, not an ongoing project instruction. Check the current worktree to determine that patch's present status.
 
 ## Architecture and state transitions
 
@@ -24,19 +24,9 @@ The existing migration runner applies all pending upward migrations in one trans
 
 ## HTTP endpoints
 
-All verification responses use `Cache-Control: no-store`.
+The complete route/method/role inventory and request-validation notes are maintained in the [API reference](API.md). Verification endpoints set `Cache-Control: no-store`.
 
-| Method and endpoint | Access and input |
-| --- | --- |
-| `GET /api/auth/csrf` | Authenticated enabled user; returns a session-bound CSRF token, no-store |
-| `GET /api/doctors/me/verification` | Doctor only; current owner's status, credentials, rejection reason and version |
-| `POST /api/doctors/me/verification` | Doctor only; `{registrationNumber, issuingAuthority, version}`; missing/rejected only |
-| `GET /api/admin/doctor-verifications` | Admin only; `status=pending\|approved\|rejected\|missing_credentials`, `limit=1..100` (20 default), `offset=0..1000000` |
-| `GET /api/admin/doctor-verifications/:id` | Admin only; professional details and current review metadata |
-| `POST /api/admin/doctor-verifications/:id/approve` | Admin only; `{version}` and eligible Pending request |
-| `POST /api/admin/doctor-verifications/:id/reject` | Admin only; `{version, reason}`; nonblank reason, at most 2,000 characters |
-
-New POST endpoints require `X-CSRF-Token`, obtained from the authenticated session endpoint. Tokens are random, compared in constant time, stored only in the server session, and invalidated by the existing login session regeneration/logout. The client obtains the current token for each mutation. Cross-origin callers cannot read it; no permissive CORS was introduced. Existing HttpOnly, SameSite=Lax cookies remain in use, with Secure cookies in production. This change scopes explicit CSRF enforcement to the new mutations; it does not claim to retrofit every pre-existing mutation.
+Doctor verification submission and Admin approve/reject mutations require `X-CSRF-Token`, obtained from the authenticated session endpoint. Tokens are random, compared in constant time, stored only in the server session, and invalidated by the existing login session regeneration/logout. The client obtains the current token for each verification mutation. Cross-origin callers cannot read it; no permissive CORS was introduced. Existing HttpOnly, SameSite=Lax cookies remain in use, with Secure cookies in production. This change scopes explicit CSRF enforcement to these mutations; it does not claim to retrofit every pre-existing mutation.
 
 ## UI
 
@@ -96,16 +86,18 @@ The example database user/port refer to a disposable local test cluster, not app
 
 For manual UI validation, run the application against only that local database and serve the built client or use an isolated Vite/API port pair. Register a fictitious Doctor with multiple specializations, sign in to see Pending, then use a manually bootstrapped local Admin to reject with a reason. Sign back in as the Doctor, correct and resubmit; use a fresh Admin review to approve. Confirm public visibility and availability access only after approval. Test patient/wrong-role access and an unauthenticated browser as well. Never point the browser at production for this validation.
 
-## Validation results and limitations
+## Historical validation results and limitations
+
+The following results were recorded in an earlier validation run. The exact run date, commit, and test-file scope are not recorded here; the reviewed base commit named above is not identified as the commit tested. These figures are not a statement about the current worktree and have not been rerun for this document.
 
 - Full backend suite: 31 files, 629 tests passed, including real PostgreSQL migration/backfill, registration rollback, role/ownership checks, disabled users, CSRF session isolation/rotation, rejected resubmission, review races, public discovery and availability. Existing patient/appointment/clinical authorization tests pass.
 - Full frontend suite: 14 files, 156 tests passed, including registration and new dashboard/status flows, route guards, confirmation, rejection reasons, escaping text, stale conflicts and CSRF client helpers.
 - Backend and frontend lint: passed without new warnings. Production client build: passed. Local migrations: 10 applied, then 0 on rerun.
 - One initial unrestricted-worker backend run passed all assertions but exited on a late-handled rejection in the unchanged existing recurring-availability race test. The full suite passes with `--maxWorkers=2`; no unrelated availability code or tests were changed.
-- Existing locked dependencies report one high-severity `source-map-js` advisory in each package: [GHSA-68fv-2mgg-jv7q](https://github.com/advisories/GHSA-68fv-2mgg-jv7q). Dependency versions/lockfiles were preserved; schedule a separate dependency update and validation before deployment.
+- Historical dependency finding: a prior scan reported [GHSA-68fv-2mgg-jv7q](https://github.com/advisories/GHSA-68fv-2mgg-jv7q) for `source-map-js` as high severity in each package. The scan date and dependency versions in scope are not recorded. This is not a claim that the advisory is current; refresh it through an authorized dependency audit before using it for a decision.
 - Approval records a human decision; submitted text is not independent license verification. No uploads, registry integration, automated approval, or clinical-record access was added. A trusted reviewer must perform the actual manual check outside the application. Historical decisions predating the new audit table remain in existing verification metadata; no historical reviewer/decision is fabricated.
 
-Before deployment, review the diff and approve it, resolve the dependency advisory as a separate reviewed change, rehearse migrations on a disposable/restored non-production database, define the trusted manual review procedure, and arrange explicit Admin creation via the CLI if needed. Deploy compatible backend/frontend code together with the upward migration so required fields and schema agree. This task does not authorize or perform deployment, production migration, production bootstrap, commit, push, or merge.
+Before deployment, review the diff and approve it, refresh the historical dependency finding, rehearse migrations on a disposable/restored non-production database, define the trusted manual review procedure, and arrange explicit Admin creation via the CLI if needed. Deploy compatible backend/frontend code together with the upward migration so required fields and schema agree. This task does not authorize or perform deployment, production migration, production bootstrap, commit, push, or merge.
 
 ## Exact files changed
 
