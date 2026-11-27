@@ -101,7 +101,10 @@ These commands are defined by the root and package manifests:
 | Lint frontend and server | `npm run lint` |
 | Run server and client test suites | `npm test` |
 | Apply local upward migrations | `npm --prefix server run migrate:up` |
+| Verify auth schema against configured database | `npm --prefix server run verify:auth-schema` |
 | Verify booking schema against configured database | `npm --prefix server run verify:booking-schema` |
+| Verify consultation schema against configured database | `npm --prefix server run verify:consultation-schema` |
+| Report clinical record counts from configured database | `npm --prefix server run report:clinical-counts` |
 
 Database integration tests require a disposable PostgreSQL database configured for the test run; without `DATABASE_URL`, some database tests are skipped. Do not use production data for development or test fixtures. These commands are available in the repository; their results are not asserted here.
 
